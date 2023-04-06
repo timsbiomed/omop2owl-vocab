@@ -22,7 +22,7 @@ install:
 # HELP -----------------------------------------------------------------------------------------------------------------
 help:
 	@echo "-----------------------------------"
-	@echo "	Command reference: N3C OWL INgest"
+	@echo "	Command reference: N3C OWL Ingest"
 	@echo "-----------------------------------"
 	@echo "all"
 	@echo "Creates all release artefacts.\n"
