@@ -1,0 +1,11 @@
+# Standard
+dev/
+data/cache/
+__pycache__/
+.idea/
+.DS_Store
+.env
+
+# Specialized
+*ignore/
+/termhub-csets/
