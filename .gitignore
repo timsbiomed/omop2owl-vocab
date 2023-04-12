@@ -6,7 +6,11 @@ __pycache__/
 .DS_Store
 .env
 
+# JS/Node/NPM
+/node_modules/
+
 # Specialized
 _archive/
 *ignore/
 /termhub-csets/
+/release/
