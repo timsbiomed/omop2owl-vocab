@@ -12,5 +12,5 @@ __pycache__/
 # Specialized
 _archive/
 *ignore/
-/termhub-csets/
-/release/
+*termhub-csets/
+io/release/

@@ -15,29 +15,47 @@ TODO's
 """
 import os
 import subprocess
-# import sys
 from datetime import datetime
 from pathlib import Path
+from string import Template
 from typing import Dict, List, Union
 
 import pandas as pd
 
+PREFIX = str
 CURIE = str
+URI_STEM = str
 SRC_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_DIR = SRC_DIR.parent
 # ROBOT_PATH = 'robot'  # 2023/04/19: Strangely, this worked. Then, an hour later, only /usr/local/bin/robot worked
 ROBOT_PATH = '/usr/local/bin/robot'
-RELEASE_DIR = PROJECT_DIR / 'release'
-TERMHUB_CSETS_DIR = PROJECT_DIR / 'termhub-csets'
+IO_DIR = PROJECT_DIR / 'io'
+RELEASE_DIR = PROJECT_DIR / IO_DIR / 'release'
+INPUT_DIR = PROJECT_DIR / IO_DIR / 'input'
+TERMHUB_CSETS_DIR = INPUT_DIR / 'termhub-csets'
 DATASETS_DIR = TERMHUB_CSETS_DIR / 'datasets' / 'prepped_files'
 # CONCEPT_CSV = DATASETS_DIR / 'concept_temp.csv'  # todo: remove _temp when done w/ development (100 rows)
 CONCEPT_CSV = DATASETS_DIR / 'concept.csv'
+CONCEPT_CSV_RELPATH = str(CONCEPT_CSV).replace(str(IO_DIR), "")
 CONCEPT_RELATIONSHIP_SUBSUMES_CSV = DATASETS_DIR / 'concept_relationship_subsumes_only.csv'
+CONCEPT_RELATIONSHIP_SUBSUMES_CSV_RELPATH = str(CONCEPT_RELATIONSHIP_SUBSUMES_CSV).replace(str(IO_DIR), "")
 # - doesn't seem like concept_ancestor is necessary
 # ancestor_concept_id,descendant_concept_id,min_levels_of_separation,max_levels_of_separation
 # CONCEPT_ANCESTOR_CSV = DATASETS_DIR / 'concept_ancestor.csv'
-OUTPATH_TEMPLATE = RELEASE_DIR / 'n3c.robot.template.tsv'
+YARRRML_TEMPLATE_FILENAME = "n3c_yarrrml.template.yaml"
+YARRRML_TEMPLATE_PATH = INPUT_DIR / YARRRML_TEMPLATE_FILENAME
+YARRRML_FILENAME = "n3c_yarrrml.yml"
+# todo: consider storing in io/tmp/ instead
+YARRRML_PATH = RELEASE_DIR / YARRRML_FILENAME
+YARRRML_RELPATH = str(YARRRML_PATH).replace(str(IO_DIR), "")
+RML_TEMPLATE_FILENAME = "n3c_rml.ttl"
+# todo: consider storing in io/tmp/ instead
+RML_TEMPLATE_PATH = RELEASE_DIR / RML_TEMPLATE_FILENAME
+RML_TEMPLATE_RELPATH = str(RML_TEMPLATE_PATH).replace(str(IO_DIR), "")
+ROBOT_TEMPLATE_PATH = RELEASE_DIR / 'n3c.robot.template.tsv'
 OUTPATH_OWL = RELEASE_DIR / 'n3c.owl'
+OUTPATH_NQUADS = RELEASE_DIR / 'n3c.nq'
+OUTPATH_NQUADS_RELPATH = str(OUTPATH_NQUADS).replace(str(IO_DIR), "")
 ONTOLOGY_IRI = 'http://purl.obolibrary.org/obo/N3C/ontology'
 # PREFIX_MAP_STR = 'N3C: http://purl.obolibrary.org/obo/N3C_'
 PREFIX_MAP_STR = 'OMOP: https://athena.ohdsi.org/search-terms/terms/'
@@ -76,11 +94,10 @@ ROBOT_SUBHEADER = {
 }
 
 
-def create_robot_template(
-    concept_subclass_ofs: Dict, num_subclass_cols: int, df: pd.DataFrame, vocab_id: str = '',
-    outpath: Union[Path, str] = OUTPATH_OWL
+def via_robot_template(
+    concept_subclass_ofs: Dict, num_subclass_cols: int, df: pd.DataFrame, outpath: Union[Path, str]
 ):
-    """Create robot template"""
+    """Create robot template and convert to OWL"""
     outpath_template = str(outpath).replace('.owl', '.robot.template.tsv')
     # concepts_in_domain = set(df.index)
 
@@ -135,8 +152,95 @@ def create_robot_template(
     return results
 
 
-def run_ingest(split_by_vocab: bool = False, skip_if_in_release: bool = True):
+def via_yarrrml(retain_intermediates=True, use_cache=True):
+    """Create YARRML yaml and convert to OWL"""
+    # todo: consider:
+    # capture_output = True, shell = True
+    # print(results1.stdout.decode())
+
+    # Load the yaml template and populate it
+    # /data: the directory in the docker container that is mapped to the IO_DIR on the host
+    substitution_map = {
+        "concept_table_filename": "/data/" + CONCEPT_CSV_RELPATH,
+        "concept_relationship_table_filename": "/data/" + CONCEPT_RELATIONSHIP_SUBSUMES_CSV_RELPATH
+    }
+    with open(YARRRML_TEMPLATE_PATH, "r") as f:
+        in_contents = f.read()
+        out_contents = Template(in_contents).safe_substitute(substitution_map)
+    with open(YARRRML_PATH, "w") as f:
+        f.write(out_contents)
+
+    # Convert this temp YARRRML mapping template to a RML mapping template.
+    subprocess.run([
+        "docker", "run", "--rm",
+        "-v", f"{IO_DIR}:/data",
+        "-e", "JAVA_TOOL_OPTIONS=\"-Xmx28G\"", "--memory", "28g",
+        "rmlio/yarrrml-parser:latest",
+        "-i", f"/data/{YARRRML_RELPATH}",
+        "-o", f"/data/{RML_TEMPLATE_RELPATH}"
+    ])
+    print('Step 1/3: Done: RML template.')
+
+    # Use the RML mapping template to process the csv's and output the triples as a ttl file.
+    # - https://github.com/RMLio/rmlmapper-java
+    # - Output format: nquads (default) https://www.w3.org/TR/n-quads/
+    if not (use_cache and Path(OUTPATH_NQUADS).exists()):
+        subprocess.run([
+            "docker", "run", "--rm",
+            "-v", f"{IO_DIR}:/data",
+            "-e", "JAVA_TOOL_OPTIONS=\"-Xmx28G\"", "--memory", "28g",
+            "rmlio/rmlmapper-java:v5.0.0",
+            "-m", f"/data/{RML_TEMPLATE_RELPATH}",
+            "-o", f"/data/{OUTPATH_NQUADS_RELPATH}"
+        ])
+    print('Step 2/3: Done: Conversion from RML mapping template to nquads complete.')
+
+    # TODO: implement final conversion step
+    print('Step 3/3: Converting nquads to OWL using Apache Jena\'s RIOT. TODO: Not yet implemented.')
+    # todo: I have no idea if I need to set this, and if so, whether or not to use export, and what variable to use
+    # memory_opts = 'MY_JAVA_OPTS="-Xmx26GB"; JAVA_OPTIONS="-Xmx26GB"; JAVA_OPTS="-Xmx26GB"; _JAVA_OPTIONS="-Xmx26GB"; ' \
+    #               'JAVA_TOOL_OPTIONS="-Xmx26GB"; export MY_JAVA_OPTS="-Xmx26GB"; export JAVA_OPTIONS="-Xmx26GB"; ' \
+    #               'export JAVA_OPTS="-Xmx26GB"; export _JAVA_OPTIONS="-Xmx26GB"; export JAVA_TOOL_OPTIONS="-Xmx26GB";'
+    # subprocess.run(memory_opts.split(' ') + [
+    # subprocess.run([
+    #     "riot", "--output=rdfxml", "-v", OUTPATH_NQUADS, ">", OUTPATH_OWL
+    # ])
+    # todo: not sure why it'd not running:
+    # 17:39:01 INFO  riot            :: File: /Users/joeflack4/projects/n3c-owl-ingest/io/release/n3c.nq
+    # 17:41:20 INFO  riot            :: File: >
+    # 17:41:20 ERROR riot            :: Not found: file:///Users/joeflack4/projects/n3c-owl-ingest/%3E
+    # org.apache.jena.riot.RiotException: Not found: file:///Users/joeflack4/projects/n3c-owl-ingest/%3E
+    # 	at org.apache.jena.riot.system.ErrorHandlerFactory$ErrorHandlerTracking.error(ErrorHandlerFactory.java:317)
+    # 	at riotcmd.CmdLangParse.parseRIOT(CmdLangParse.java:309)
+    # 	at riotcmd.CmdLangParse.parseFile(CmdLangParse.java:259)
+    # 	at riotcmd.CmdLangParse.exec$(CmdLangParse.java:165)
+    # 	at riotcmd.CmdLangParse.exec(CmdLangParse.java:130)
+    # 	at org.apache.jena.cmd.CmdMain.mainMethod(CmdMain.java:87)
+    # 	at org.apache.jena.cmd.CmdMain.mainRun(CmdMain.java:56)
+    # 	at org.apache.jena.cmd.CmdMain.mainRun(CmdMain.java:43)
+    # 	at riotcmd.riot.main(riot.java:29)
+
+    # echo TODO: Convert OWL to SemSQL
+
+    # Cleaning up temporary files and copying back out of the working directory.
+    if not retain_intermediates:
+        os.remove(YARRRML_TEMPLATE_PATH)
+        os.remove(RML_TEMPLATE_PATH)
+    return
+
+
+def run_ingest(split_by_vocab: bool = False, skip_if_in_release: bool = True, method=['yarrrml', 'robot'][0]):
     """Run the ingest"""
+    outpath = OUTPATH_OWL
+    if skip_if_in_release and os.path.exists(outpath):
+        print('Skipping because already exists:', outpath)
+        return
+    if split_by_vocab and method == 'yarrrml':
+        raise NotImplemented('Not implemented yet: Splitting using YARRRML method.')
+    elif method == 'yarrrml':
+        return via_yarrrml()
+    # else: method = 'robot'
+
     # Read inputs
     # - concept_relationship table
     concept_subsumes_df = pd.read_csv(CONCEPT_RELATIONSHIP_SUBSUMES_CSV, dtype=CONCEPT_RELATIONSHIP_DTYPES).fillna('')
@@ -152,7 +256,7 @@ def run_ingest(split_by_vocab: bool = False, skip_if_in_release: bool = True):
 
     # Construct robot template
     # - Convert concept table to robot template format
-    if split_by_vocab:
+    if split_by_vocab and method == 'robot':
         grouped = concept_df.groupby('vocabulary_id')
         i = 1
         name: str
@@ -167,14 +271,14 @@ def run_ingest(split_by_vocab: bool = False, skip_if_in_release: bool = True):
                 continue
             # noinspection PyBroadException
             try:
-                create_robot_template(concept_subclass_ofs, num_subclass_cols, group, name, outpath)
+                via_robot_template(concept_subclass_ofs, num_subclass_cols, group, outpath)
             except Exception:
                 os.remove(outpath)
             t_i2 = datetime.now()
             print(f'Vocab {name} finished in {(t_i2 - t_i1).seconds} seconds')
             i += 1
     else:
-        create_robot_template(concept_subclass_ofs, num_subclass_cols, concept_df)
+        via_robot_template(concept_subclass_ofs, num_subclass_cols, concept_df, outpath)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 distlib==0.3.6
 filelock==3.11.0
+MarkupSafe==2.1.2
 numpy==1.24.2
 pandas==2.0.0
 pbr==5.11.1
