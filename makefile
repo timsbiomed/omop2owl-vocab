@@ -6,14 +6,14 @@ all: n3c.db
 
 # TODO: Dockerized SemSQL I think is best way to do this
 n3c.db: n3c.owl
-	echo TODO
+	echo TODO: Convert OWL to SemSQL
 
-n3c.owl: termhub-csets
+n3c.owl: io/input/termhub-csets
 	 python3 -m n3c_owl_ingest
 
 # TODO: allow some force updating of termhub-csets
-termhub-csets:
-	git clone https://github.com/jhu-bids/termhub-csets.git
+io/input/termhub-csets:
+	cd io/input; git clone https://github.com/jhu-bids/termhub-csets.git
 
 # SETUP / INSTALLATION -------------------------------------------------------------------------------------------------
 install:
