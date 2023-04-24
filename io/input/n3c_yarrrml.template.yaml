@@ -1,0 +1,42 @@
+prefixes:
+  cpont: https://w3id.org/cpont/
+  omoprel: https://w3id.org/cpont/omop/relations/
+  omoptype: https://w3id.org/cpont/omop/types/
+  omopclass: https://w3id.org/cpont/omop/classes/
+  OMOP: https://athena.ohdsi.org/search-terms/terms/
+  rdfs: http://www.w3.org/2000/01/rdf-schema#
+
+mappings:
+
+  # concept table
+  # The expected input CSV is the concept table format, but only a subset of columns are necessary for now.
+  concept:
+    sources:
+      - ['${concept_table_filename}~csv']
+    s: OMOP:$(concept_id)
+    po:
+      - [rdfs:subClassOf, omoptype:omop_datamodel_concept~iri]
+      - [omoprel:concept_name, $(concept_name), xsd:string]
+      - [omoprel:concept_code, $(concept_code), xsd:string]
+      - [omoprel:vocabulary_id, $(vocabulary_id), xsd:string]
+
+# concept_relationship table
+# The expected input CSV is the concept_relationship table with an additional column called relationship_uri.
+# That columns should contain the full URI for the relationship including the prefix already applied. This is
+# done this way for now because some of these relationships we want to made to standard rdfs predicates ahead
+# of time, before any relationships are ingested into the knowledge graph, and others can be left as the
+# relationships that are specified in the OMOP CDM, but cleaned to be snake_case.
+# concept_relationship:
+#   sources:
+#     - ['${concept_relationship_table_filename}~csv']
+#   s: OMOP:$(concept_id_1)
+#   po:
+#     - [$(relationship_uri), OMOP:$(concept_id_2)~iri]
+# TODO: joeflack4: I could do this variation:
+# todo: do I want to do the IRI instead?
+concept_relationship:
+  sources:
+    - ['${concept_relationship_table_filename}~csv']
+  s: OMOP:$(concept_id_2)
+  po:
+    - [rdfs:subClassOf, OMOP:$(concept_id_1)~iri]
