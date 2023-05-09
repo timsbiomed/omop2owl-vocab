@@ -12,9 +12,13 @@ TODO's
    - ignore some concept_class_ids? Such as if not SNOMED, etc
  - concept_ancestor
    - May want to use this. See workflowy / comments here
+ - Several questions sent to Ian Braun: https://obo-communitygroup.slack.com/archives/D056X9LUG4V/p1683673222343379
+   - usage of omoprel
+   - character set to allow for CURIEs (https://www.w3.org/TR/curie/#P_curie)
 """
 import os
 import subprocess
+from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
 from string import Template
@@ -25,6 +29,9 @@ import pandas as pd
 PREFIX = str
 CURIE = str
 URI_STEM = str
+CONCEPT_ID = int
+PREDICATE_ID = str
+REL_MAPS = Dict[PREDICATE_ID, Dict[CONCEPT_ID, List[CONCEPT_ID]]]
 SRC_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_DIR = SRC_DIR.parent
 # ROBOT_PATH = 'robot'  # 2023/04/19: Strangely, this worked. Then, an hour later, only /usr/local/bin/robot worked
@@ -32,11 +39,13 @@ ROBOT_PATH = '/usr/local/bin/robot'
 IO_DIR = PROJECT_DIR / 'io'
 RELEASE_DIR = PROJECT_DIR / IO_DIR / 'release'
 INPUT_DIR = PROJECT_DIR / IO_DIR / 'input'
+PREFIXES_CSV = INPUT_DIR / 'prefixes.csv'
 TERMHUB_CSETS_DIR = INPUT_DIR / 'termhub-csets'
 DATASETS_DIR = TERMHUB_CSETS_DIR / 'datasets' / 'prepped_files'
 # CONCEPT_CSV = DATASETS_DIR / 'concept_temp.csv'  # todo: remove _temp when done w/ development (100 rows)
 CONCEPT_CSV = DATASETS_DIR / 'concept.csv'
 CONCEPT_CSV_RELPATH = str(CONCEPT_CSV).replace(str(IO_DIR), "")
+CONCEPT_RELATIONSHIP_CSV = DATASETS_DIR / 'concept_relationship.csv'
 CONCEPT_RELATIONSHIP_SUBSUMES_CSV = DATASETS_DIR / 'concept_relationship_subsumes_only.csv'
 CONCEPT_RELATIONSHIP_SUBSUMES_CSV_RELPATH = str(CONCEPT_RELATIONSHIP_SUBSUMES_CSV).replace(str(IO_DIR), "")
 # - doesn't seem like concept_ancestor is necessary
@@ -53,11 +62,11 @@ RML_TEMPLATE_FILENAME = "n3c_rml.ttl"
 RML_TEMPLATE_PATH = RELEASE_DIR / RML_TEMPLATE_FILENAME
 RML_TEMPLATE_RELPATH = str(RML_TEMPLATE_PATH).replace(str(IO_DIR), "")
 ROBOT_TEMPLATE_PATH = RELEASE_DIR / 'n3c.robot.template.tsv'
-OUTPATH_OWL = RELEASE_DIR / 'n3c.owl'
+OUTPATH_OWL = str(RELEASE_DIR / 'n3c.owl')
 OUTPATH_NQUADS = RELEASE_DIR / 'n3c.nq'
 OUTPATH_NQUADS_RELPATH = str(OUTPATH_NQUADS).replace(str(IO_DIR), "")
 ONTOLOGY_IRI = 'http://purl.obolibrary.org/obo/N3C/ontology'
-# PREFIX_MAP_STR = 'N3C: http://purl.obolibrary.org/obo/N3C_'
+# PREFIX_MAP_STR = 'OMOP: http://purl.obolibrary.org/obo/N3C_'
 PREFIX_MAP_STR = 'OMOP: https://athena.ohdsi.org/search-terms/terms/'
 CONCEPT_DTYPES = {
     'concept_id': str,  # is int, but we're just serializing, not manipulating
@@ -83,73 +92,99 @@ ROBOT_SUBHEADER = {
     'ID': 'ID',
     'Label': 'A rdfs:label',
     'Type': 'TYPE',
-    'domain_id': 'A N3C:domain_id',
-    'vocabulary_id': 'A N3C:vocabulary_id',
-    'concept_class_id': 'A N3C:concept_class_id',
-    'standard_concept': 'A N3C:standard_concept',
-    'concept_code': 'A N3C:concept_code',
-    'valid_start_date': 'A N3C:valid_start_date',
-    'valid_end_date': 'A N3C:valid_end_date',
-    'invalid_reason': 'A N3C:invalid_reason',
+    'domain_id': 'A OMOP:domain_id',
+    'vocabulary_id': 'A OMOP:vocabulary_id',
+    'concept_class_id': 'A OMOP:concept_class_id',
+    'standard_concept': 'A OMOP:standard_concept',
+    'concept_code': 'A OMOP:concept_code',
+    'valid_start_date': 'A OMOP:valid_start_date',
+    'valid_end_date': 'A OMOP:valid_end_date',
+    'invalid_reason': 'A OMOP:invalid_reason',
+    'rdfs:subClassOf': 'SC % SPLIT=|',
+}
+REL_PRED_MAP = {
+    'Subsumes': 'rdfs:subClassOf',
+    'RxNorm inverse is a': 'rdfs:subClassOf',
 }
 
 
 def via_robot_template(
-    concept_subclass_ofs: Dict, num_subclass_cols: int, df: pd.DataFrame, outpath: Union[Path, str]
+    df: pd.DataFrame, rel_maps: REL_MAPS, outpath: Union[Path, str], robot_subheader: Dict[str, str] = ROBOT_SUBHEADER,
+    use_cache=False
 ):
     """Create robot template and convert to OWL"""
-    outpath_template = str(outpath).replace('.owl', '.robot.template.tsv')
     # concepts_in_domain = set(df.index)
+    outpath_template = str(outpath).replace('.owl', '.robot.template.tsv')
+    # rdfs:subClassOf represented always as 'SC' in robot subheader, so handled separately
+    robot_subheader = \
+        robot_subheader | {k: f'A {k} SPLIT=|' for k in [x for x in rel_maps.keys() if x != 'rdfs:subClassOf']}
 
-    d: Dict[CURIE, Dict[str, str]] = {}
-    for row in df.itertuples():
-        # todo: faster if I build curies beforehand
-        # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
-        curie_omop = f'N3C:{row.Index}'
-        # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
-        row_dict = {
-            'ID': curie_omop,
-            'Label': row.concept_name,
-            'Type': 'class',
-            'domain_id': row.domain_id,
-            'vocabulary_id': row.vocabulary_id,
-            'concept_class_id': row.concept_class_id,
-            'standard_concept': row.standard_concept,
-            'concept_code': row.concept_code,
-            'valid_start_date': row.valid_start_date,
-            'valid_end_date': row.valid_end_date,
-            'invalid_reason': row.invalid_reason,
-        }
-        # todo: faster if jagged? e.g. each entry has actual amount its parents & let pd.DataFrame(d.values()) handle?
-        for i in range(num_subclass_cols):
-            try:
-                # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
-                parent_concept_id = concept_subclass_ofs[row.Index][i]
-                # if parent_concept_id not in concepts_in_domain:
-                #     print(f'Warning: Parent not in vocab. This causes issue w/ our strategy to split table.: {vocab_id}', file=sys.stderr)
-                parent_curie_omop = f'N3C:{parent_concept_id}'
-                row_dict[f'Parent Class {i + 1}'] = parent_curie_omop
-            except (KeyError, IndexError):
-                row_dict[f'Parent Class {i + 1}'] = ''
-        d[curie_omop] = row_dict
+    if not(os.path.exists(outpath_template) and use_cache):
+        d: Dict[CURIE, Dict[str, str]] = {}
+        for row in df.itertuples():
+            # todo: faster if I build curies beforehand
+            # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
+            curie_omop = f'OMOP:{row.Index}'
+            # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
+            row_dict = {
+                'ID': curie_omop,
+                'Label': row.concept_name,
+                'Type': 'class',
+                'domain_id': row.domain_id,
+                'vocabulary_id': row.vocabulary_id,
+                'concept_class_id': row.concept_class_id,
+                'standard_concept': row.standard_concept,
+                'concept_code': row.concept_code,
+                'valid_start_date': row.valid_start_date,
+                'valid_end_date': row.valid_end_date,
+                'invalid_reason': row.invalid_reason,
+                'rdfs:subClassOf': '',
+            }
+            # todo: faster if jagged? e.g. each entry has actual amount its parents & let pd.DataFrame(d.values()) handle?
+            for rel, rel_map_i in rel_maps.items():
+                try:
+                    # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
+                    concept_ids: List[int] = rel_map_i[row.Index]
+                    # if parent_concept_id not in concepts_in_domain:
+                    #     print(f'Warning: Parent not in vocab. This causes issue w/ our strategy to split table.: {vocab_id}', file=sys.stderr)
+                    row_dict[rel] = '|'.join([f'OMOP:{x}' for x in concept_ids])
+                except (KeyError, IndexError):
+                    row_dict[rel] = ''
+            d[curie_omop] = row_dict
 
-    # - Add robot subheader
-    for i in range(num_subclass_cols):
-        ROBOT_SUBHEADER[f'Parent Class {i + 1}'] = f'SC %'
-    # - Create CSV
-    robot_df = pd.DataFrame([ROBOT_SUBHEADER] + list(d.values()))
-    robot_df.to_csv(outpath_template, index=False, sep='\t')
+        # - Create CSV
+        robot_df = pd.DataFrame([robot_subheader] + list(d.values()))
+        robot_df.to_csv(outpath_template, index=False, sep='\t')
 
-    # Convert to OWL
-    command = f'export ROBOT_JAVA_ARGS=-Xmx28G; ' \
-              f'"{ROBOT_PATH}" template ' \
-              f'--template "{outpath_template}" ' \
-              f'--prefix "{PREFIX_MAP_STR}" ' \
-              f'--ontology-iri "{ONTOLOGY_IRI}" ' \
-              f'--output "{outpath}"'
-    results = subprocess.run(command, capture_output=True, shell=True)
-    print(results.stdout.decode())
-    return results
+    if not(os.path.exists(outpath) and use_cache):
+        # Convert to OWL
+        print(f' - converting to OWL')
+        command = f'export ROBOT_JAVA_ARGS=-Xmx28G; ' \
+                  f'"{ROBOT_PATH}" template ' \
+                  f'--template "{outpath_template}" ' \
+                  f'--prefix "{PREFIX_MAP_STR}" ' \
+                  f'--ontology-iri "{ONTOLOGY_IRI}" ' \
+                  f'--output "{outpath}"'
+        results = subprocess.run(command, capture_output=True, shell=True)
+        print(results.stdout.decode())
+
+    if not(os.path.exists(outpath.replace('.owl', '..db')) and use_cache):
+        print(f' - converting to SemanticSQL')
+        # todo: remove these comments when done
+        # syntax: docker run -v $PWD:/work -w /work -ti linkml/semantic-sql semsql make foo.db
+        # example: RUST_BACKTRACE=full semsql make $@ -P config/prefixes.csv
+        # TODO: replace with just 'docker' when fixed. see: https://youtrack.jetbrains.com/issue/PY-45462/Pycharm-environment-variable-Path-is-different-from-python-console
+        # TODO: add back "-P {PREFIXES_CSV" when fixed: Usage: semsql make [OPTIONS] PATH\nTry 'semsql make --help' for help.\n\nError: No such option: -P\n"
+        rel_outpath = outpath.replace(str(IO_DIR), "")
+        command = f'/usr/local/bin/docker run ' \
+                  f'-v {IO_DIR}:/work ' \
+                  f'-w /work ' \
+                  f'linkml/semantic-sql ' \
+                  f'semsql make /work/{rel_outpath.replace(".owl", ".db")}'
+        # f'semsql make {outpath.replace(".owl", ".db")} -P {PREFIXES_CSV}'
+        results = subprocess.run(command, capture_output=True, shell=True)
+        print(results.stdout.decode())
+        return results
 
 
 def via_yarrrml(retain_intermediates=True, use_cache=True):
@@ -231,9 +266,16 @@ def via_yarrrml(retain_intermediates=True, use_cache=True):
     return
 
 
-def run_ingest(split_by_vocab: bool = False, skip_if_in_release: bool = True, method=['yarrrml', 'robot'][0]):
+def main_ingest(
+    split_by_vocab: bool = False, concept_csv_path: str = CONCEPT_CSV,
+    concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_SUBSUMES_CSV, skip_if_in_release: bool = True,
+    vocabs: List[str] = [], relationships: List[str] = ['Subsumes'], method=['yarrrml', 'robot'][0], use_cache=False
+):
     """Run the ingest"""
-    outpath = OUTPATH_OWL
+    # todo: excessive customization for rxnorm here is code smell. what if rxnorm + atc situation changes?
+    outpath = OUTPATH_OWL if not vocabs \
+        else OUTPATH_OWL.replace('n3c.owl', 'n3c-RxNorm.owl') if 'RxNorm' in vocabs and len(vocabs) < 3 \
+        else OUTPATH_OWL.replace('n3c.owl', f'n3c-{"-".join(vocabs)}.owl')
     if skip_if_in_release and os.path.exists(outpath):
         print('Skipping because already exists:', outpath)
         return
@@ -245,24 +287,40 @@ def run_ingest(split_by_vocab: bool = False, skip_if_in_release: bool = True, me
 
     # Read inputs
     # - concept_relationship table
-    concept_subsumes_df = pd.read_csv(CONCEPT_RELATIONSHIP_SUBSUMES_CSV, dtype=CONCEPT_RELATIONSHIP_DTYPES).fillna('')
-    concept_subsumes_df = concept_subsumes_df[concept_subsumes_df.invalid_reason == '']
-    concept_subclass_ofs: Dict[List[int]] = {}
-    for row in concept_subsumes_df.itertuples(index=False):
-        # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
-        concept_subclass_ofs.setdefault(row.concept_id_2, []).append(row.concept_id_1)
-    # how_many_parents_gt_1 = [len(x) > 1 for x in concept_subclass_ofs.values()].count(True)  # analysis: 215,489 / ~7m
-    num_subclass_cols = max([len(x) for x in concept_subclass_ofs.values()])  # determined by greatest num parents
+    concept_rel_df = pd.read_csv(concept_relationship_csv_path, dtype=CONCEPT_RELATIONSHIP_DTYPES).fillna('')
+    concept_rel_df = concept_rel_df[concept_rel_df.invalid_reason == '']
+    # todo: include automatic addition of these relationships?
+    # if vocabs:
+    #     rels = concept_rel_df.relationship_id.unique()
+    # if 'RxNorm' in vocabs:
+    #     # noinspection PyUnboundLocalVariable pycharm_wrong
+    #     relationships += [x for x in rels if 'rx' in x.lower()]
+    # if 'ATC' in vocabs:
+    #     # noinspection PyUnboundLocalVariable pycharm_wrong
+    #     relationships += [x for x in rels if 'atc' in x.lower()]
+    # relationships = list(set(relationships))
+    rel_maps: REL_MAPS = {}
+    for rel in relationships:
+        pred: PREDICATE_ID = f'omoprel:{rel.replace(" ", "_")}' if rel not in REL_PRED_MAP else REL_PRED_MAP[rel]
+        rel_maps[pred] = {}
+        df_i = concept_rel_df[concept_rel_df.relationship_id == rel]
+        for row in df_i.itertuples(index=False):
+            # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
+            rel_maps[pred].setdefault(row.concept_id_2, []).append(row.concept_id_1)
+
     # - concept table
-    concept_df = pd.read_csv(CONCEPT_CSV, index_col='concept_id', dtype=CONCEPT_DTYPES).fillna('')
+    concept_df = pd.read_csv(concept_csv_path, index_col='concept_id', dtype=CONCEPT_DTYPES).fillna('')
 
     # Construct robot template
     # - Convert concept table to robot template format
-    if split_by_vocab and method == 'robot':
+    if vocabs and method == 'robot':
+        df = concept_df[concept_df.vocabulary_id.isin(vocabs)]
+        via_robot_template(df, rel_maps, outpath, use_cache=use_cache)
+    elif split_by_vocab and method == 'robot':
         grouped = concept_df.groupby('vocabulary_id')
         i = 1
         name: str
-        for name, group in grouped:
+        for name, group_df in grouped:
             name = name if name else 'Metadata'  # AFAIK, there's just 1 concept "No matching concept" for this
             t_i1 = datetime.now()
             print('Starting vocab', i, 'of', len(grouped), ':', name)
@@ -273,18 +331,52 @@ def run_ingest(split_by_vocab: bool = False, skip_if_in_release: bool = True, me
                 continue
             # noinspection PyBroadException
             try:
-                via_robot_template(concept_subclass_ofs, num_subclass_cols, group, outpath)
+                via_robot_template(group_df, rel_maps, outpath, use_cache=use_cache)
             except Exception:
                 os.remove(outpath)
             t_i2 = datetime.now()
             print(f'Vocab {name} finished in {(t_i2 - t_i1).seconds} seconds')
             i += 1
     else:
-        via_robot_template(concept_subclass_ofs, num_subclass_cols, concept_df, outpath)
+        via_robot_template(concept_df, rel_maps, outpath, use_cache=use_cache)
+
+
+def cli():
+    """Command line interface."""
+    parser = ArgumentParser('Creates TSVs and of unmapped terms as well as summary statistics.')
+    parser.add_argument(
+        '-o', '--output-type', required=True, default='all-merged', choices=['all-merged', 'all-split', 'rxnorm'],
+        help='What output to generate? If "all-merged" will create an n3c.db file with all concepts of all vocabs '
+             'merged into one. If "all-split" will create an n3c-*.db file for each vocab. If "rxnorm" will create a '
+             'specifically customized n3c-RxNorm.db.')
+    parser.add_argument(
+        '-c', '--concept-csv-path', required=False, default=CONCEPT_CSV, help='Path to CSV of OMOP concept table.')
+    parser.add_argument(
+        '-r', '--concept-relationship-csv-path', required=False, default=CONCEPT_RELATIONSHIP_SUBSUMES_CSV,
+        help='Path to CSV of OMOP concept_relationship table.')
+    parser.add_argument(
+        '-C', '--use-cache', required=False, action='store_true',
+        help='Of outputs or intermediates already exist, use them')
+    d = vars(parser.parse_args())
+    if d['output_type'] == 'all-split':
+        main_ingest(
+            split_by_vocab=True, concept_csv_path=d['concept_csv_path'],
+            concept_relationship_csv_path=d['concept_relationship_csv_path'], use_cache=d['use_cache'])
+    elif d['output_type'] == 'all-merged':
+        if d['concept_csv_path'] != CONCEPT_CSV or d['concept_relationship_csv_path'] != CONCEPT_RELATIONSHIP_SUBSUMES_CSV:
+            raise ValueError('Not implemented yet: Custom concept CSVs with all-merged output.')
+        main_ingest(split_by_vocab=False, use_cache=d['use_cache'])
+    elif d['output_type'] == 'rxnorm':
+        # rxnorm_ingest(concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'])
+        main_ingest(
+            split_by_vocab=True, method='robot', vocabs=['RxNorm', 'ATC'],
+            relationships=['Subsumes', 'Maps to', 'RxNorm inverse is a'],
+            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
+            use_cache=d['use_cache'])
 
 
 if __name__ == '__main__':
     t1 = datetime.now()
-    run_ingest()
+    cli()
     t2 = datetime.now()
     print(f'Finished in {(t2 - t1).seconds} seconds')
