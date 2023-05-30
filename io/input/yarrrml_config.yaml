@@ -230,3 +230,7 @@ prefixes:
   Orphanet: "http://www.orpha.net/ORDO/Orphanet_"
   N3C: "http://purl.obolibrary.org/obo/N3C_"
   OMOP: "https://athena.ohdsi.org/search-terms/terms/"
+  cpont: "https://w3id.org/cpont/"
+  omoprel: "https://w3id.org/cpont/omop/relations/"
+  omoptype: "https://w3id.org/cpont/omop/types/"
+  omopclass: "https://w3id.org/cpont/omop/classes/"
