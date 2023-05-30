@@ -359,21 +359,21 @@ def cli():
         '-C', '--use-cache', required=False, action='store_true',
         help='Of outputs or intermediates already exist, use them')
     d = vars(parser.parse_args())
-    if d['output_type'] == 'all-split':
-        main_ingest(
-            split_by_vocab=True, concept_csv_path=d['concept_csv_path'],
-            concept_relationship_csv_path=d['concept_relationship_csv_path'], use_cache=d['use_cache'])
-    elif d['output_type'] == 'all-merged':
-        if d['concept_csv_path'] != CONCEPT_CSV or d['concept_relationship_csv_path'] != CONCEPT_RELATIONSHIP_SUBSUMES_CSV:
-            raise ValueError('Not implemented yet: Custom concept CSVs with all-merged output.')
-        main_ingest(split_by_vocab=False, use_cache=d['use_cache'])
-    elif d['output_type'] == 'rxnorm':
-        # rxnorm_ingest(concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'])
-        main_ingest(
-            split_by_vocab=True, method='robot', vocabs=['RxNorm', 'ATC'],
-            relationships=['Subsumes', 'Maps to', 'RxNorm inverse is a'],
-            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            use_cache=d['use_cache'])
+    # if d['output_type'] == 'all-split':
+    #     main_ingest(
+    #         split_by_vocab=True, concept_csv_path=d['concept_csv_path'],
+    #         concept_relationship_csv_path=d['concept_relationship_csv_path'], use_cache=d['use_cache'])
+    # elif d['output_type'] == 'all-merged':
+    #     if d['concept_csv_path'] != CONCEPT_CSV or d['concept_relationship_csv_path'] != CONCEPT_RELATIONSHIP_SUBSUMES_CSV:
+    #         raise ValueError('Not implemented yet: Custom concept CSVs with all-merged output.')
+    #     main_ingest(split_by_vocab=False, use_cache=d['use_cache'])
+    # elif d['output_type'] == 'rxnorm':
+    #     # rxnorm_ingest(concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'])
+    #     main_ingest(
+    #         split_by_vocab=True, method='robot', vocabs=['RxNorm', 'ATC'],
+    #         relationships=['Subsumes', 'Maps to', 'RxNorm inverse is a'],
+    #         concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
+    #         use_cache=d['use_cache'])
 
 
 if __name__ == '__main__':
