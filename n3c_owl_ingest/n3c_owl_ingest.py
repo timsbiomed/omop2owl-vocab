@@ -272,6 +272,7 @@ def main_ingest(
     vocabs: List[str] = [], relationships: List[str] = ['Subsumes'], method=['yarrrml', 'robot'][0], use_cache=False
 ):
     """Run the ingest"""
+    os.makedirs(RELEASE_DIR, exist_ok=True)
     # todo: excessive customization for rxnorm here is code smell. what if rxnorm + atc situation changes?
     outpath = OUTPATH_OWL if not vocabs \
         else OUTPATH_OWL.replace('n3c.owl', 'n3c-RxNorm.owl') if 'RxNorm' in vocabs and len(vocabs) < 3 \
@@ -345,7 +346,7 @@ def cli():
     """Command line interface."""
     parser = ArgumentParser('Creates TSVs and of unmapped terms as well as summary statistics.')
     parser.add_argument(
-        '-o', '--output-type', required=True, default='all-merged', choices=['all-merged', 'all-split', 'rxnorm'],
+        '-o', '--output-type', required=False, default='all-merged', choices=['all-merged', 'all-split', 'rxnorm'],
         help='What output to generate? If "all-merged" will create an n3c.db file with all concepts of all vocabs '
              'merged into one. If "all-split" will create an n3c-*.db file for each vocab. If "rxnorm" will create a '
              'specifically customized n3c-RxNorm.db.')
