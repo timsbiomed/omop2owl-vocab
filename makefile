@@ -1,14 +1,10 @@
-.PHONY: all
+.PHONY: all install install-python download-dependencies help
 
 
 # MAIN COMMANDS / GOALS ------------------------------------------------------------------------------------------------
 all: n3c.db
 
-# TODO: Dockerized SemSQL I think is best way to do this
-n3c.db: n3c.owl
-	echo TODO: Convert OWL to SemSQL
-
-n3c.owl: io/input/termhub-csets
+n3c.owl n3c.db: io/input/termhub-csets
 	 python3 -m n3c_owl_ingest
 
 # TODO: allow some force updating of termhub-csets
@@ -16,8 +12,12 @@ io/input/termhub-csets:
 	cd io/input; git clone https://github.com/jhu-bids/termhub-csets.git
 
 # SETUP / INSTALLATION -------------------------------------------------------------------------------------------------
-install:
+install-python:
 	pip install -r requirements.txt
+
+download-dependencies: io/input/termhub-csets
+
+install: install-python download-dependencies
 
 # HELP -----------------------------------------------------------------------------------------------------------------
 help:

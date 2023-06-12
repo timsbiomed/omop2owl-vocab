@@ -59,6 +59,7 @@ YARRRML_FILENAME = "n3c_yarrrml.yml"
 # todo: consider storing in io/tmp/ instead
 YARRRML_PATH = RELEASE_DIR / YARRRML_FILENAME
 YARRRML_RELPATH = str(YARRRML_PATH).replace(str(IO_DIR), "")
+SEMSQL_TEMPLATE_PATH = os.path.join(IO_DIR, '.template.db')
 RML_TEMPLATE_FILENAME = "n3c_rml.ttl"
 # todo: consider storing in io/tmp/ instead
 RML_TEMPLATE_PATH = RELEASE_DIR / RML_TEMPLATE_FILENAME
@@ -299,6 +300,8 @@ def main_ingest(
     skip_semsql: bool = False
 ):
     """Run the ingest"""
+    if os.path.exists(SEMSQL_TEMPLATE_PATH):
+        os.remove(SEMSQL_TEMPLATE_PATH)
     os.makedirs(RELEASE_DIR, exist_ok=True)
     # todo: excessive customization for rxnorm here is code smell. what if rxnorm + atc situation changes?
     outpath = OUTPATH_OWL if not vocabs \
@@ -318,8 +321,13 @@ def main_ingest(
     # else: method = 'robot'
 
     # Read inputs
-    # - concept_relationship table
+    # - concept table
     t_0 = datetime.now()
+    concept_df = pd.read_csv(concept_csv_path, index_col='concept_id', dtype=CONCEPT_DTYPES).fillna('')
+    t_1 = datetime.now()
+    print('Read "concept" table in', (t_1 - t_0).seconds, 'seconds')
+
+    # - concept_relationship table
     concept_rel_df = pd.read_csv(concept_relationship_csv_path, dtype=CONCEPT_RELATIONSHIP_DTYPES).fillna('')
     concept_rel_df = concept_rel_df[concept_rel_df.invalid_reason == '']
     # todo: include automatic addition of these relationships?
@@ -340,13 +348,8 @@ def main_ingest(
         for row in df_i.itertuples(index=False):
             # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
             rel_maps[pred].setdefault(row.concept_id_2, []).append(row.concept_id_1)
-    t_1 = datetime.now()
-    print('Read "concept_relationships" table in', (t_1 - t_0).seconds, 'seconds')
-
-    # - concept table
-    concept_df = pd.read_csv(concept_csv_path, index_col='concept_id', dtype=CONCEPT_DTYPES).fillna('')
     t_2 = datetime.now()
-    print('Read "concept" table in', (t_2 - t_1).seconds, 'seconds')
+    print('Read "concept_relationships" table in', (t_2 - t_1).seconds, 'seconds')
 
     # Construct robot template
     # - Convert concept table to robot template format
@@ -403,6 +406,8 @@ def main_ingest(
             _convert_semsql(outpath)
     else:
         via_robot_template(concept_df, rel_maps, outpath, use_cache=use_cache, skip_semsql=skip_semsql)
+    if os.path.exists(SEMSQL_TEMPLATE_PATH):
+        os.remove(SEMSQL_TEMPLATE_PATH)
 
 
 def cli():
