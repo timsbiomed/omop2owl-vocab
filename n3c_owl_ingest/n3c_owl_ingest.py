@@ -17,13 +17,14 @@ TODO's
    - character set to allow for CURIEs (https://www.w3.org/TR/curie/#P_curie)
 """
 import os
+import pickle
 import subprocess
 import sys
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
 from string import Template
-from typing import Dict, List, Union
+from typing import Dict, List, Set, Tuple, Union
 
 import pandas as pd
 
@@ -36,7 +37,10 @@ REL_MAPS = Dict[PREDICATE_ID, Dict[CONCEPT_ID, List[CONCEPT_ID]]]
 SRC_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_DIR = SRC_DIR.parent
 # ROBOT_PATH = 'robot'  # 2023/04/19: Strangely, this worked. Then, an hour later, only /usr/local/bin/robot worked
-ROBOT_PATH = '/usr/local/bin/robot'
+# ROBOT_PATH = '/usr/local/bin/robot'
+# DOCKER_PATH = '/usr/local/bin/docker'
+ROBOT_PATH = 'robot'
+DOCKER_PATH = 'docker'
 IO_DIR = PROJECT_DIR / 'io'
 RELEASE_DIR = PROJECT_DIR / IO_DIR / 'release'
 INPUT_DIR = PROJECT_DIR / IO_DIR / 'input'
@@ -124,15 +128,17 @@ def _run_robot(command: str):
         print(result_stderr, file=sys.stderr)
 
 
-def _convert_semsql(outpath: str):
+def _convert_semsql(owl_outpath: str, quiet=False):
     """Convert to SemanticSQL"""
-    print(f' - converting to SemanticSQL')
+    if not quiet:
+        print(f' - converting to SemanticSQL')
     # todo: ideal if backtrace worked: ex: RUST_BACKTRACE=full semsql make $@ -P config/prefixes.csv
     #  docker: Error response from daemon: failed to create shim task: OCI runtime create failed: runc create failed:
     #  unable to start container process: exec: "RUST_BACKTRACE=full": executable file not found in $PATH: unknown.
     # todo: replace with just 'docker' when fixed. see: https://youtrack.jetbrains.com/issue/PY-45462/Pycharm-environment-variable-Path-is-different-from-python-console
-    rel_outpath = outpath.replace(str(IO_DIR) + '/', '')
-    command = f'/usr/local/bin/docker run ' \
+    rel_outpath = owl_outpath.replace(str(IO_DIR) + '/', '')
+    # Run
+    command = f'{DOCKER_PATH} run ' \
               f'-v {IO_DIR}:/work ' \
               f'-w /work ' \
               f'obolibrary/odkfull:dev ' \
@@ -140,17 +146,26 @@ def _convert_semsql(outpath: str):
               f'{rel_outpath.replace(".owl", ".db")} ' \
               f'-P {PREFIXES_CSV_RELPATH}'
     _run_robot(command)
-    relation_graph_path = os.path.join(
-        os.path.dirname(outpath), os.path.basename(outpath).replace('.owl', 'relation-graph.tsv.gz'))
-    if os.path.exists(relation_graph_path):
-        os.remove(relation_graph_path)
+    # Cleanup
+    intermediate_patterns = ['.db.tmp', '-relation-graph.tsv.gz']
+    for pattern in intermediate_patterns:
+        path = os.path.join(os.path.dirname(owl_outpath), os.path.basename(owl_outpath).replace('.owl', pattern))
+        if os.path.exists(path):
+            os.remove(path)
+    _cleanup_leftover_semsql_intermediates()
 
 
-def via_robot_template(
+def _cleanup_leftover_semsql_intermediates():
+    """Cleanup leftover intermediate files created by SemanticSQL"""
+    if os.path.exists(SEMSQL_TEMPLATE_PATH):
+        os.remove(SEMSQL_TEMPLATE_PATH)
+
+def _robot_method_outputs(
     df: pd.DataFrame, rel_maps: REL_MAPS, outpath: Union[Path, str], robot_subheader: Dict[str, str] = ROBOT_SUBHEADER,
     use_cache=False, skip_semsql=False
-):
-    """Create robot template and convert to OWL"""
+) -> bool:
+    """Create robot template and convert to OWL and SemanticSQL
+    :returns Whether or not using cached version of OWL"""
     # todo: remove this replacement when taken care of properly elsewhere
     outpath = os.path.join(os.path.dirname(outpath), os.path.basename(outpath).replace(' ', '-'))
     # concepts_in_domain = set(df.index)
@@ -197,7 +212,8 @@ def via_robot_template(
         robot_df = pd.DataFrame([robot_subheader] + list(d.values()))
         robot_df.to_csv(outpath_template, index=False, sep='\t')
 
-    if not(os.path.exists(outpath) and use_cache):
+    using_cached_owl: bool = os.path.exists(outpath) and use_cache
+    if not using_cached_owl:
         # Convert to OWL
         print(f' - converting to OWL')
         command = \
@@ -212,6 +228,8 @@ def via_robot_template(
 
     if not(os.path.exists(str(outpath).replace('.owl', '.db')) and use_cache) and not skip_semsql:
         _convert_semsql(outpath)
+
+    return using_cached_owl
 
 
 def via_yarrrml(retain_intermediates=True, use_cache=True):
@@ -293,132 +311,225 @@ def via_yarrrml(retain_intermediates=True, use_cache=True):
     return
 
 
-def main_ingest(
-    split_by_vocab: bool = False, split_by_vocab_merge_after: bool = False, concept_csv_path: str = CONCEPT_CSV,
-    concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_SUBSUMES_CSV, skip_if_in_release: bool = False,
-    vocabs: List[str] = [], relationships: List[str] = ['Subsumes'], method=['yarrrml', 'robot'][1], use_cache=False,
-    skip_semsql: bool = False
-):
-    """Run the ingest"""
-    if os.path.exists(SEMSQL_TEMPLATE_PATH):
-        os.remove(SEMSQL_TEMPLATE_PATH)
-    os.makedirs(RELEASE_DIR, exist_ok=True)
-    # todo: excessive customization for rxnorm here is code smell. what if rxnorm + atc situation changes?
-    outpath = OUTPATH_OWL if not vocabs \
-        else OUTPATH_OWL.replace('n3c.owl', 'n3c-RxNorm.owl') if 'RxNorm' in vocabs and len(vocabs) < 3 \
-        else OUTPATH_OWL.replace('n3c.owl', f'n3c-{"-".join(vocabs)}.owl')
-    # SemSQL errors if space in name
-    outpath = os.path.join(os.path.dirname(outpath), os.path.basename(outpath).replace(' ', '-'))
-    if skip_if_in_release and os.path.exists(outpath):
-        print('Skipping because already exists:', outpath)
-        return
-    if split_by_vocab and method == 'yarrrml':
-        raise NotImplemented('Not implemented yet: Splitting using YARRRML method.')
-    elif method == 'yarrrml':
-        print('Warning: YARRRML method still has some bugs, e.g. the ones listed here which do not exist for robot '
-              'method: https://github.com/jhu-bids/TermHub/issues/314', file=sys.stderr)
-        return via_yarrrml()
-    # else: method = 'robot'
+def _get_relationship_maps(concept_rel_df: pd.DataFrame, relationships: List[str], concept_ids: Set[str]) -> REL_MAPS:
+    """Get relationship maps"""
+    rel_maps: REL_MAPS = {}
+    relationships = relationships if relationships != ['ALL'] else concept_rel_df.relationship_id.unique()
+    # todo: any way to increase performance?
+    for rel in relationships:
+        # todo: spaces ok? replace with _?
+        pred: PREDICATE_ID = f'omoprel:{rel.replace(" ", "_")}' if rel not in REL_PRED_MAP else REL_PRED_MAP[rel]
+        # pred: PREDICATE_ID = f'omoprel:{rel}' if rel not in REL_PRED_MAP else REL_PRED_MAP[rel]
+        rel_maps[pred] = {}
+        df_i = concept_rel_df[concept_rel_df.relationship_id == rel]
+        df_i = df_i[df_i['concept_id_1'].isin(concept_ids)]
+
+        # todo: any way to increase performance below?
+        # rel_maps[pred]: chatgpt thought this was faster but in 1 experiemnt it was 3x slower
+        # rel_maps[pred] = df_i.groupby('concept_id_2')['concept_id_1'].apply(list).to_dict()
+        for row in df_i.itertuples(index=False):
+            # todo: I could just change it so that we look for "Is a" by default and don't have to flip
+            if rel == 'Subsumes':
+                rel_maps[pred].setdefault(row.concept_id_2, []).append(row.concept_id_1)
+            else:
+                rel_maps[pred].setdefault(row.concept_id_1, []).append(row.concept_id_2)
+    return rel_maps
+
+
+def _get_core_ojbects(
+    outpath: str, vocabs: List[str] = [], relationships: List[str] = ['Subsumes'], keep_singletons: bool = False,
+    concept_csv_path: str = CONCEPT_CSV, concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_SUBSUMES_CSV,
+    use_cache=False
+) -> Tuple[pd.DataFrame, REL_MAPS]:
+    """Get core objects"""
+    t_0 = datetime.now()
+    # Load cache
+    cache_filename = os.path.basename(outpath).replace(".owl", "") + (
+        f'__vocabs_{"_".join(vocabs)}' if vocabs else '') + f'__relationships_{"_".join(relationships)}' '.pkl'
+    cache_path = os.path.join(os.path.dirname(outpath), cache_filename)
+    if use_cache and os.path.exists(cache_path):
+        with open(cache_path, 'rb') as f:
+            t_1 = datetime.now()
+            d = pickle.load(f)
+            print('Loaded cached tables and objects in', (t_1 - t_0).seconds, 'seconds')
+            return d['concept_df'], d['rel_maps']
 
     # Read inputs
     # - concept table
-    t_0 = datetime.now()
     concept_df = pd.read_csv(concept_csv_path, index_col='concept_id', dtype=CONCEPT_DTYPES).fillna('')
+    concept_ids: Set[str] = set(concept_df.index)
     t_1 = datetime.now()
     print('Read "concept" table in', (t_1 - t_0).seconds, 'seconds')
 
     # - concept_relationship table
     concept_rel_df = pd.read_csv(concept_relationship_csv_path, dtype=CONCEPT_RELATIONSHIP_DTYPES).fillna('')
     concept_rel_df = concept_rel_df[concept_rel_df.invalid_reason == '']
-    # todo: include automatic addition of these relationships?
-    # if vocabs:
-    #     rels = concept_rel_df.relationship_id.unique()
-    # if 'RxNorm' in vocabs:
-    #     # noinspection PyUnboundLocalVariable pycharm_wrong
-    #     relationships += [x for x in rels if 'rx' in x.lower()]
-    # if 'ATC' in vocabs:
-    #     # noinspection PyUnboundLocalVariable pycharm_wrong
-    #     relationships += [x for x in rels if 'atc' in x.lower()]
-    # relationships = list(set(relationships))
-    rel_maps: REL_MAPS = {}
-    for rel in relationships:
-        pred: PREDICATE_ID = f'omoprel:{rel.replace(" ", "_")}' if rel not in REL_PRED_MAP else REL_PRED_MAP[rel]
-        rel_maps[pred] = {}
-        df_i = concept_rel_df[concept_rel_df.relationship_id == rel]
-        for row in df_i.itertuples(index=False):
-            # noinspection PyUnresolvedReferences It_doesnt_know_that_row_is_a_namedtuple
-            rel_maps[pred].setdefault(row.concept_id_2, []).append(row.concept_id_1)
     t_2 = datetime.now()
     print('Read "concept_relationships" table in', (t_2 - t_1).seconds, 'seconds')
 
-    # Construct robot template
-    # - Convert concept table to robot template format
-    if vocabs and method == 'robot':
-        df = concept_df[concept_df.vocabulary_id.isin(vocabs)]
-        via_robot_template(df, rel_maps, outpath, use_cache=use_cache, skip_semsql=skip_semsql)
-    elif split_by_vocab and method == 'robot':
-        grouped = concept_df.groupby('vocabulary_id')
-        i = 1
-        name: str
-        vocab_outpaths: List[Path] = []
-        for name, group_df in grouped:
-            name = name if name else 'Metadata'  # AFAIK, there's just 1 concept "No matching concept" for this
-            t_i1 = datetime.now()
-            print('Starting vocab', i, 'of', len(grouped), ':', name)
-            vocab_outpath = RELEASE_DIR / f'n3c-{name}.owl'.replace(' ', '-')
-            vocab_outpaths.append(vocab_outpath)
-            if skip_if_in_release and os.path.exists(vocab_outpath):
-                i += 1
-                continue
-            # noinspection PyBroadException
-            try:
-                # todo: The way this is, it makes it maybe look like there is an option in the CLI to allow the user to
-                #  include semsql output when doing all-merged-post-split, but that's not the case.
-                via_robot_template(
-                    group_df, rel_maps, vocab_outpath, use_cache=use_cache,
-                    skip_semsql=True if split_by_vocab_merge_after else skip_semsql)
-            except Exception:
-                os.remove(vocab_outpath)
-            t_i2 = datetime.now()
-            print(f'Vocab {name} finished in {(t_i2 - t_i1).seconds} seconds\n')
-            i += 1
-        if split_by_vocab_merge_after:
-            # todo: make header calculation dynamic
-            header_len = 12
-            footer_len = 6  # I'm counting 7, but somehow that's removing 1 too many
-            print(f' - joining vocab .owl files into a single OWL')
-            if not (os.path.exists(outpath) and use_cache):
-                with open(outpath, 'a') as file:
-                    for i, path in enumerate(vocab_outpaths):
-                        print(f'   - {i + 1} of {len(vocab_outpaths)}: {os.path.basename(path).replace(".owl", "")}')
-                        with open(path) as vocab_file:
-                            try:
-                                header_len_i = 0 if i == 0 else header_len  # include header at start
-                                lines = vocab_file.readlines()
-                                if i == len(vocab_outpaths) - 1:  # include footer at end
-                                    contents = ''.join(lines[header_len_i:])
-                                else:
-                                    contents = ''.join(lines[header_len_i:-footer_len])
-                                file.write(contents)
-                            except Exception as e:
-                                os.remove(outpath)
-                                raise e
-            _convert_semsql(outpath)
-    else:
-        via_robot_template(concept_df, rel_maps, outpath, use_cache=use_cache, skip_semsql=skip_semsql)
-    if os.path.exists(SEMSQL_TEMPLATE_PATH):
-        os.remove(SEMSQL_TEMPLATE_PATH)
+    # Filter by vocab
+    if vocabs:
+        concept_df = concept_df[concept_df.vocabulary_id.isin(vocabs)]
+        concept_ids: Set[str] = set(concept_df.index)
+        concept_rel_df = concept_rel_df[
+            (concept_rel_df.concept_id_1.isin(concept_ids)) |
+            (concept_rel_df.concept_id_2.isin(concept_ids))]
+        t_3 = datetime.now()
+        print('Filtered vocabularies in', (t_3 - t_2).seconds, 'seconds')
+    # todo: include automatic addition of these relationships in specific vocabs?
+    # if 'RxNorm' in vocabs:
+    #     relationships += [x for x in rels if 'rx' in x.lower()]
+    # if 'ATC' in vocabs:
+    #     relationships += [x for x in rels if 'atc' in x.lower()]
+
+    # Group relationships
+    t_4a = datetime.now()
+    rel_maps: REL_MAPS = _get_relationship_maps(concept_rel_df, relationships, concept_ids)
+    t_4b = datetime.now()
+    print('Grouped relationships in ', (t_4b - t_4a).seconds, 'seconds')
+
+    # Filter out singletons
+    if not keep_singletons:
+        concepts_with_relations = set(concept_rel_df.concept_id_1) | set(concept_rel_df.concept_id_2)
+        concept_df = concept_df[~concept_df.index.isin(concepts_with_relations)]
+
+    # Cache and return
+    with open(cache_path, 'wb') as f:
+        d = {'concept_df': concept_df, 'rel_maps': rel_maps}
+        pickle.dump(d, f, protocol=pickle.HIGHEST_PROTOCOL)
+    return concept_df, rel_maps
+
+
+# todo: terms -> OMOP  -  e.g. xmlns:terms="https://athena.ohdsi.org/search-terms/terms/">
+#  - though this requires also replacing all instances in all files
+def _fix_header(header_lines: List[str]) -> str:
+    """Fix RDF/XML header. This is a hack because of some current issues with robot"""
+    fixes = [
+        '     xmlns:relations="https://w3id.org/cpont/omop/relations/"\n',
+        '     xmlns:omoprel="https://w3id.org/cpont/omop/relations/"\n',
+        '     xmlns:OMOP="https://athena.ohdsi.org/search-terms/terms/"\n',
+        '     xmlns:terms="https://athena.ohdsi.org/search-terms/terms/"'
+        '>\n',
+    ]
+    new_lines = header_lines[0:8] + fixes + header_lines[9:]
+    header = ''.join(new_lines)
+    return header
+
+
+def via_robot(
+    outpath: str, split_by_vocab: bool = False, split_by_vocab_merge_after: bool = False, vocabs: List[str] = [],
+    concept_csv_path: str = CONCEPT_CSV, concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_SUBSUMES_CSV,
+    relationships: List[str] = ['Subsumes'], use_cache=False, skip_semsql: bool = False, keep_singletons: bool = False
+):
+    """Via robot"""
+    concept_df, rel_maps = _get_core_ojbects(
+        outpath, vocabs, relationships, keep_singletons, concept_csv_path, concept_relationship_csv_path, use_cache)
+    print()
+    if vocabs:
+        return _robot_method_outputs(concept_df, rel_maps, outpath, use_cache=use_cache, skip_semsql=skip_semsql)
+    elif not split_by_vocab:
+        return _robot_method_outputs(concept_df, rel_maps, outpath, use_cache=use_cache, skip_semsql=skip_semsql)
+    # - Split by vocab
+    # -- Create outputs by vocab
+    grouped = concept_df.groupby('vocabulary_id')
+    i = 1
+    name: str
+    vocab_outpaths: List[Path] = []
+    uncached_owl_exists = False
+    for name, group_df in grouped:
+        name = name if name else 'Metadata'  # AFAIK, there's just 1 concept "No matching concept" for this
+        t_i1 = datetime.now()
+        print(f'Creating outputs {i} of {len(grouped)}: {name}')
+        vocab_outpath = RELEASE_DIR / f'n3c-{name}.owl'.replace(' ', '-')
+        vocab_outpaths.append(vocab_outpath)
+        # noinspection PyBroadException
+        try:
+            # todo: The way this is, it makes it maybe look like there is an option in the CLI to allow the user to
+            #  include semsql output when doing all-merged-post-split, but that's not the case.
+            using_cached_owl = _robot_method_outputs(
+                group_df, rel_maps, vocab_outpath, use_cache=use_cache,
+                skip_semsql=True if split_by_vocab_merge_after else skip_semsql)
+            if not using_cached_owl:
+                uncached_owl_exists = True
+        except Exception:
+            os.remove(vocab_outpath)
+        t_i2 = datetime.now()
+        print(f' - finished in {(t_i2 - t_i1).seconds} seconds\n')
+        i += 1
+    # -- Merge outputs by vocab
+    if split_by_vocab_merge_after and (not (os.path.exists(outpath) and use_cache) or uncached_owl_exists):
+        # todo: make header calculation dynamic
+        header_len = 12
+        footer_len = 6  # I'm counting 7, but somehow that's removing 1 too many
+        if os.path.exists(outpath):
+            os.remove(outpath)
+        print(f'Joining vocab .owl files into a single OWL')
+        with open(outpath, 'a') as file:
+            for i, path in enumerate(vocab_outpaths):
+                print(f' - {i + 1} of {len(vocab_outpaths)}: {os.path.basename(path).replace(".owl", "")}')
+                with open(path) as vocab_file:
+                    try:
+                        lines = vocab_file.readlines()
+                        if i == 0:
+                            original = lines[:header_len]
+                            header = _fix_header(original)
+                            file.write(header)
+                        if i == len(vocab_outpaths) - 1:  # include footer at end
+                            contents = ''.join(lines[header_len:])
+                        else:
+                            contents = ''.join(lines[header_len:-footer_len])
+                        file.write(contents)
+                    except Exception as e:
+                        os.remove(outpath)
+                        raise e
+    if not (os.path.exists(outpath.replace('.owl', '.db')) and use_cache):
+        print(f'Converting to SemanticSQL')
+        _convert_semsql(outpath, quiet=True)
+
+
+def main_ingest(
+    split_by_vocab: bool = False, split_by_vocab_merge_after: bool = False, concept_csv_path: str = CONCEPT_CSV,
+    concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_SUBSUMES_CSV, vocabs: List[str] = [],
+    relationships: List[str] = ['Subsumes'], method=['yarrrml', 'robot'][1], use_cache=False, skip_semsql: bool = False,
+    keep_singletons: bool = False
+):
+    """Run the ingest"""
+    # Basic setup
+    _cleanup_leftover_semsql_intermediates()
+    os.makedirs(RELEASE_DIR, exist_ok=True)
+    # todo: excessive customization for rxnorm here is code smell. what if rxnorm + atc situation changes?
+    outpath: str = OUTPATH_OWL if not vocabs \
+        else OUTPATH_OWL.replace('n3c.owl', 'n3c-RxNorm.owl') if 'RxNorm' in vocabs and len(vocabs) < 3 \
+        else OUTPATH_OWL.replace('n3c.owl', f'n3c-{"-".join(vocabs)}.owl')
+    # -  SemSQL errors if space in name
+    outpath = os.path.join(os.path.dirname(outpath), os.path.basename(outpath).replace(' ', '-'))
+    if use_cache and os.path.exists(outpath.replace('.owl', '.db')):
+        print('Skipping because of --use-cache. Already exists:', outpath)
+        return
+
+    # YARRRML method
+    if split_by_vocab and method == 'yarrrml':
+        raise NotImplemented('Not implemented yet: Splitting using YARRRML method.')
+    elif method == 'yarrrml':
+        print('Warning: YARRRML method still has some bugs, e.g. the ones listed here which do not exist for robot '
+              'method: https://github.com/jhu-bids/TermHub/issues/314', file=sys.stderr)
+        return via_yarrrml()
+    # Robot method
+    return via_robot(
+        outpath, split_by_vocab, split_by_vocab_merge_after, vocabs, concept_csv_path, concept_relationship_csv_path,
+        relationships, use_cache, skip_semsql, keep_singletons)
 
 
 def cli():
     """Command line interface."""
     parser = ArgumentParser('Creates TSVs and of unmapped terms as well as summary statistics.')
     parser.add_argument(
-        '-o', '--output-type', required=False, default='all-merged-post-split',
-        choices=['all-merged', 'all-split', 'all-merged-post-split', 'rxnorm', 'specific-vocabs-merged'],
-        help='What output to generate? If "all-merged" will create an n3c.db file with all concepts of all vocabs '
-             'merged into one. If "all-split" will create an n3c-*.db file for each vocab. If "rxnorm" will create a '
-             'specifically customized n3c-RxNorm.db.')
+        '-o', '--output-type', required=False, default='merged-post-split',
+        choices=['merged', 'split', 'merged-post-split', 'rxnorm'],
+        help='What output to generate? If "merged" will create an n3c.db file with all concepts of all vocabs '
+             'merged into one. If "split" will create an n3c-*.db file for each vocab. "merged-post-split" output will '
+             'be as if running both "split" and  "merged", but the merging implementation is different. Use this option '
+             'if running out of memory. If using "rxnorm", will create a specifically customized n3c-RxNorm.db.')
     parser.add_argument(
         '-c', '--concept-csv-path', required=False, default=CONCEPT_CSV, help='Path to CSV of OMOP concept table.')
     parser.add_argument(
@@ -429,17 +540,33 @@ def cli():
         help='What tooling / method to use to generate output?')
     parser.add_argument(
         '-v', '--vocabs', required=False, nargs='+',
-        help='Used with `--output-type specific-vocabs-merged`. Which vocabularies to include in the output?')
+        help='Used with `--output-type specific-vocabs-merged`. Which vocabularies to include in the output?  Usage: '
+             '--vocabs "Procedure Type" "Device Type"')
+    parser.add_argument(
+        '-R', '--relationships', required=False, nargs='+', default=['Subsumes'],
+        help='Which relationship types from the concept_relationship table\'s relationship_id field to include? '
+             'Default is "Subsumes" only. Passing "ALL" includes everything. Ignored for --output-type options that are '
+             'specific to a pre-set vocabulary (e.g. rxnorm). Usage: --realationships "Subsumes" "Maps to"')
     parser.add_argument(
         '-S', '--skip-semsql', required=False, action='store_true',
         help='In addition to .owl, also convert to a SemanticSQL .db? This is always True except when --output-type is '
              'all-merged-post-split and it is creating initial .owl files to be merged.')
     parser.add_argument(
+        '-k', '--keep-singletons', required=False, action='store_true',
+        help='Currently, to help with the very high memory demands of processing all of N3C OMOP as a single OWL, and '
+             'because immediate needs of users do not require singletons (classes with no relationships), they are being'
+             ' left out by default. Adding this flag will keep them. This only applies to --method robot. Since there is'
+             ' no memory issue with --method yarrrml, they will always be retained there.')
+    parser.add_argument(
+        '-s', '--semsql-only', required=False, action='store_true',
+        help='Use this if the .owl already exists and you just want to create a SemanticSQL .db.')
+    parser.add_argument(
         '-s', '--semsql-only', required=False, action='store_true',
         help='Use this if the .owl already exists and you just want to create a SemanticSQL .db.')
     parser.add_argument(
         '-C', '--use-cache', required=False, action='store_true',
-        help='Of outputs or intermediates already exist, use them')
+        help='Of outputs or intermediates already exist, use them.')
+
     d = vars(parser.parse_args())
     if d['semsql_only']:
         # todo: excessive customization for rxnorm here is code smell. what if rxnorm + atc situation changes?
@@ -448,31 +575,31 @@ def cli():
             else OUTPATH_OWL.replace('n3c.owl', 'n3c-RxNorm.owl') if 'RxNorm' in vocabs and len(vocabs) < 3 \
             else OUTPATH_OWL.replace('n3c.owl', f'n3c-{"-".join(vocabs)}.owl')
         _convert_semsql(outpath)
-    elif d['output_type'] == 'all-split':
+    elif d['output_type'] == 'split':
         main_ingest(
             split_by_vocab=True, method='robot', use_cache=d['use_cache'], concept_csv_path=d['concept_csv_path'],
-            concept_relationship_csv_path=d['concept_relationship_csv_path'], skip_semsql=d['skip_semsql'])
-    elif d['output_type'] == 'all-merged-post-split':
+            concept_relationship_csv_path=d['concept_relationship_csv_path'], skip_semsql=d['skip_semsql'],
+            keep_singletons=d['keep_singletons'], relationships=d['relationships'], vocabs=d['vocabs'])
+    elif d['output_type'] == 'merged-post-split':
         main_ingest(
             split_by_vocab=True, split_by_vocab_merge_after=True, method='robot', use_cache=d['use_cache'],
             concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            skip_semsql=d['skip_semsql'])
-    elif d['output_type'] == 'all-merged':
+            skip_semsql=d['skip_semsql'], keep_singletons=d['keep_singletons'], relationships=d['relationships'],
+            vocabs=d['vocabs'])
+    elif d['output_type'] == 'merged':
         # TODO: should this value error still exist?
         if d['concept_csv_path'] != CONCEPT_CSV or d['concept_relationship_csv_path'] != CONCEPT_RELATIONSHIP_SUBSUMES_CSV:
             raise ValueError('Not implemented yet: Custom concept CSVs with all-merged output.')
-        main_ingest(split_by_vocab=False, use_cache=d['use_cache'], skip_semsql=d['skip_semsql'])
+        main_ingest(
+            split_by_vocab=False, use_cache=d['use_cache'], skip_semsql=d['skip_semsql'],
+            keep_singletons=d['keep_singletons'], relationships=d['relationships'], vocabs=d['vocabs'])
     elif d['output_type'] == 'rxnorm':
         # rxnorm_ingest(concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'])
         main_ingest(
             split_by_vocab=True, method='robot', vocabs=['RxNorm', 'ATC'], use_cache=d['use_cache'],
             relationships=['Subsumes', 'Maps to', 'RxNorm inverse is a'], skip_semsql=d['skip_semsql'],
-            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'])
-    elif d['output_type'] == 'specific-vocabs-merged':
-        main_ingest(
-            split_by_vocab=True, method='robot', vocabs=d['vocabs'], use_cache=d['use_cache'],
             concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            skip_semsql=d['skip_semsql'])
+            keep_singletons=d['keep_singletons'])
 
 
 if __name__ == '__main__':
