@@ -391,7 +391,7 @@ def _get_core_ojbects(
     # Filter out singletons
     if not keep_singletons:
         concepts_with_relations = set(concept_rel_df.concept_id_1) | set(concept_rel_df.concept_id_2)
-        concept_df = concept_df[~concept_df.index.isin(concepts_with_relations)]
+        concept_df = concept_df[concept_df.index.isin(concepts_with_relations)]
 
     # Cache and return
     with open(cache_path, 'wb') as f:
@@ -557,9 +557,6 @@ def cli():
              'because immediate needs of users do not require singletons (classes with no relationships), they are being'
              ' left out by default. Adding this flag will keep them. This only applies to --method robot. Since there is'
              ' no memory issue with --method yarrrml, they will always be retained there.')
-    parser.add_argument(
-        '-s', '--semsql-only', required=False, action='store_true',
-        help='Use this if the .owl already exists and you just want to create a SemanticSQL .db.')
     parser.add_argument(
         '-s', '--semsql-only', required=False, action='store_true',
         help='Use this if the .owl already exists and you just want to create a SemanticSQL .db.')
