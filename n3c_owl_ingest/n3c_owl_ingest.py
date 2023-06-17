@@ -16,6 +16,7 @@ TODO's
    - usage of omoprel
    - character set to allow for CURIEs (https://www.w3.org/TR/curie/#P_curie)
 """
+import hashlib
 import os
 import pickle
 import subprocess
@@ -52,8 +53,8 @@ DATASETS_DIR = TERMHUB_CSETS_DIR / 'datasets' / 'prepped_files'
 CONCEPT_CSV = DATASETS_DIR / 'concept.csv'
 CONCEPT_CSV_RELPATH = str(CONCEPT_CSV).replace(str(IO_DIR), '')
 CONCEPT_RELATIONSHIP_CSV = DATASETS_DIR / 'concept_relationship.csv'
-CONCEPT_RELATIONSHIP_SUBSUMES_CSV = DATASETS_DIR / 'concept_relationship_subsumes_only.csv'
-CONCEPT_RELATIONSHIP_SUBSUMES_CSV_RELPATH = str(CONCEPT_RELATIONSHIP_SUBSUMES_CSV).replace(str(IO_DIR), "")
+CONCEPT_RELATIONSHIP_SUBSUMES_ONLY_CSV = DATASETS_DIR / 'concept_relationship_subsumes_only.csv'
+CONCEPT_RELATIONSHIP_CSV_RELPATH = str(CONCEPT_RELATIONSHIP_CSV).replace(str(IO_DIR), "")
 # - doesn't seem like concept_ancestor is necessary
 # ancestor_concept_id,descendant_concept_id,min_levels_of_separation,max_levels_of_separation
 # CONCEPT_ANCESTOR_CSV = DATASETS_DIR / 'concept_ancestor.csv'
@@ -242,7 +243,7 @@ def via_yarrrml(retain_intermediates=True, use_cache=True):
     # /data: the directory in the docker container that is mapped to the IO_DIR on the host
     substitution_map = {
         "concept_table_filename": "/data/" + CONCEPT_CSV_RELPATH,
-        "concept_relationship_table_filename": "/data/" + CONCEPT_RELATIONSHIP_SUBSUMES_CSV_RELPATH
+        "concept_relationship_table_filename": "/data/" + CONCEPT_RELATIONSHIP_CSV_RELPATH
     }
     with open(YARRRML_TEMPLATE_PATH, "r") as f:
         in_contents = f.read()
@@ -313,10 +314,12 @@ def via_yarrrml(retain_intermediates=True, use_cache=True):
 
 def _get_relationship_maps(concept_rel_df: pd.DataFrame, relationships: List[str], concept_ids: Set[str]) -> REL_MAPS:
     """Get relationship maps"""
+    concept_rel_df = concept_rel_df.sort_values(['relationship_id'])
     rel_maps: REL_MAPS = {}
     relationships = relationships if relationships != ['ALL'] else concept_rel_df.relationship_id.unique()
     # todo: any way to increase performance?
-    for rel in relationships:
+    for i, rel in enumerate(relationships):
+        print(f' - {i + 1} of {len(relationships)}: {rel}')
         # todo: spaces ok? replace with _?
         pred: PREDICATE_ID = f'omoprel:{rel.replace(" ", "_")}' if rel not in REL_PRED_MAP else REL_PRED_MAP[rel]
         # pred: PREDICATE_ID = f'omoprel:{rel}' if rel not in REL_PRED_MAP else REL_PRED_MAP[rel]
@@ -337,16 +340,17 @@ def _get_relationship_maps(concept_rel_df: pd.DataFrame, relationships: List[str
 
 
 def _get_core_ojbects(
-    outpath: str, vocabs: List[str] = [], relationships: List[str] = ['Subsumes'], keep_singletons: bool = False,
-    concept_csv_path: str = CONCEPT_CSV, concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_SUBSUMES_CSV,
+    outpath: str, vocabs: List[str] = [], relationships: List[str] = ['Subsumes'], exclude_singletons: bool = False,
+    concept_csv_path: str = CONCEPT_CSV, concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_CSV,
     use_cache=False
 ) -> Tuple[pd.DataFrame, REL_MAPS]:
     """Get core objects"""
     t_0 = datetime.now()
     # Load cache
     cache_filename = os.path.basename(outpath).replace(".owl", "") + (
-        f'__vocabs_{"_".join(vocabs)}' if vocabs else '') + f'__relationships_{"_".join(relationships)}' '.pkl'
-    cache_path = os.path.join(os.path.dirname(outpath), cache_filename)
+        f'__vocabs_{"_".join(vocabs)}' if vocabs else '') + f'__relationships_{"_".join(relationships)}'
+    cache_hash = hashlib.md5(cache_filename.encode('utf-8')).hexdigest()
+    cache_path = os.path.join(os.path.dirname(outpath), cache_hash + '.pkl')
     if use_cache and os.path.exists(cache_path):
         with open(cache_path, 'rb') as f:
             t_1 = datetime.now()
@@ -384,14 +388,15 @@ def _get_core_ojbects(
 
     # Group relationships
     t_4a = datetime.now()
+    print('Grouping relationships...')
     rel_maps: REL_MAPS = _get_relationship_maps(concept_rel_df, relationships, concept_ids)
     t_4b = datetime.now()
     print('Grouped relationships in ', (t_4b - t_4a).seconds, 'seconds')
 
     # Filter out singletons
-    if not keep_singletons:
+    if exclude_singletons:
         concepts_with_relations = set(concept_rel_df.concept_id_1) | set(concept_rel_df.concept_id_2)
-        concept_df = concept_df[concept_df.index.isin(concepts_with_relations)]
+        concept_df = concept_df[~concept_df.index.isin(concepts_with_relations)]
 
     # Cache and return
     with open(cache_path, 'wb') as f:
@@ -418,13 +423,12 @@ def _fix_header(header_lines: List[str]) -> str:
 
 def via_robot(
     outpath: str, split_by_vocab: bool = False, split_by_vocab_merge_after: bool = False, vocabs: List[str] = [],
-    concept_csv_path: str = CONCEPT_CSV, concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_SUBSUMES_CSV,
-    relationships: List[str] = ['Subsumes'], use_cache=False, skip_semsql: bool = False, keep_singletons: bool = False
+    concept_csv_path: str = CONCEPT_CSV, concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_CSV,
+    relationships: List[str] = ['Subsumes'], use_cache=False, skip_semsql: bool = False, exclude_singletons: bool = False
 ):
     """Via robot"""
     concept_df, rel_maps = _get_core_ojbects(
-        outpath, vocabs, relationships, keep_singletons, concept_csv_path, concept_relationship_csv_path, use_cache)
-    print()
+        outpath, vocabs, relationships, exclude_singletons, concept_csv_path, concept_relationship_csv_path, use_cache)
     if vocabs:
         return _robot_method_outputs(concept_df, rel_maps, outpath, use_cache=use_cache, skip_semsql=skip_semsql)
     elif not split_by_vocab:
@@ -489,9 +493,9 @@ def via_robot(
 
 def main_ingest(
     split_by_vocab: bool = False, split_by_vocab_merge_after: bool = False, concept_csv_path: str = CONCEPT_CSV,
-    concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_SUBSUMES_CSV, vocabs: List[str] = [],
+    concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_CSV, vocabs: List[str] = [],
     relationships: List[str] = ['Subsumes'], method=['yarrrml', 'robot'][1], use_cache=False, skip_semsql: bool = False,
-    keep_singletons: bool = False
+    exclude_singletons: bool = False
 ):
     """Run the ingest"""
     # Basic setup
@@ -517,7 +521,7 @@ def main_ingest(
     # Robot method
     return via_robot(
         outpath, split_by_vocab, split_by_vocab_merge_after, vocabs, concept_csv_path, concept_relationship_csv_path,
-        relationships, use_cache, skip_semsql, keep_singletons)
+        relationships, use_cache, skip_semsql, exclude_singletons)
 
 
 def cli():
@@ -533,7 +537,7 @@ def cli():
     parser.add_argument(
         '-c', '--concept-csv-path', required=False, default=CONCEPT_CSV, help='Path to CSV of OMOP concept table.')
     parser.add_argument(
-        '-r', '--concept-relationship-csv-path', required=False, default=CONCEPT_RELATIONSHIP_SUBSUMES_CSV,
+        '-r', '--concept-relationship-csv-path', required=False, default=CONCEPT_RELATIONSHIP_CSV,
         help='Path to CSV of OMOP concept_relationship table.')
     parser.add_argument(
         '-m', '--method', required=False, default='robot', choices=['robot', 'yarrrml'],
@@ -552,11 +556,8 @@ def cli():
         help='In addition to .owl, also convert to a SemanticSQL .db? This is always True except when --output-type is '
              'all-merged-post-split and it is creating initial .owl files to be merged.')
     parser.add_argument(
-        '-k', '--keep-singletons', required=False, action='store_true',
-        help='Currently, to help with the very high memory demands of processing all of N3C OMOP as a single OWL, and '
-             'because immediate needs of users do not require singletons (classes with no relationships), they are being'
-             ' left out by default. Adding this flag will keep them. This only applies to --method robot. Since there is'
-             ' no memory issue with --method yarrrml, they will always be retained there.')
+        '-e', '--exclude-singletons', required=False, action='store_true',
+        help='Exclude terms that do not have any relationships. This only applies to --method robot.')
     parser.add_argument(
         '-s', '--semsql-only', required=False, action='store_true',
         help='Use this if the .owl already exists and you just want to create a SemanticSQL .db.')
@@ -576,27 +577,27 @@ def cli():
         main_ingest(
             split_by_vocab=True, method='robot', use_cache=d['use_cache'], concept_csv_path=d['concept_csv_path'],
             concept_relationship_csv_path=d['concept_relationship_csv_path'], skip_semsql=d['skip_semsql'],
-            keep_singletons=d['keep_singletons'], relationships=d['relationships'], vocabs=d['vocabs'])
+            exclude_singletons=d['exclude_singletons'], relationships=d['relationships'], vocabs=d['vocabs'])
     elif d['output_type'] == 'merged-post-split':
         main_ingest(
             split_by_vocab=True, split_by_vocab_merge_after=True, method='robot', use_cache=d['use_cache'],
             concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            skip_semsql=d['skip_semsql'], keep_singletons=d['keep_singletons'], relationships=d['relationships'],
+            skip_semsql=d['skip_semsql'], exclude_singletons=d['exclude_singletons'], relationships=d['relationships'],
             vocabs=d['vocabs'])
     elif d['output_type'] == 'merged':
         # TODO: should this value error still exist?
-        if d['concept_csv_path'] != CONCEPT_CSV or d['concept_relationship_csv_path'] != CONCEPT_RELATIONSHIP_SUBSUMES_CSV:
+        if d['concept_csv_path'] != CONCEPT_CSV or d['concept_relationship_csv_path'] != CONCEPT_RELATIONSHIP_CSV:
             raise ValueError('Not implemented yet: Custom concept CSVs with all-merged output.')
         main_ingest(
             split_by_vocab=False, use_cache=d['use_cache'], skip_semsql=d['skip_semsql'],
-            keep_singletons=d['keep_singletons'], relationships=d['relationships'], vocabs=d['vocabs'])
+            exclude_singletons=d['exclude_singletons'], relationships=d['relationships'], vocabs=d['vocabs'])
     elif d['output_type'] == 'rxnorm':
         # rxnorm_ingest(concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'])
         main_ingest(
             split_by_vocab=True, method='robot', vocabs=['RxNorm', 'ATC'], use_cache=d['use_cache'],
             relationships=['Subsumes', 'Maps to', 'RxNorm inverse is a'], skip_semsql=d['skip_semsql'],
             concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            keep_singletons=d['keep_singletons'])
+            exclude_singletons=d['exclude_singletons'])
 
 
 if __name__ == '__main__':
