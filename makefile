@@ -13,7 +13,10 @@ python-dependencies:
 
 # TODO: allow some force updating of termhub-csets
 io/input/termhub-csets:
-	cd io/input; git clone https://github.com/jhu-bids/termhub-csets.git
+	cd io/input
+	git clone https://github.com/jhu-bids/termhub-csets.git
+	cd termhub-csets
+	git lfs pull
 
 download-dependencies: io/input/termhub-csets
 

@@ -5,10 +5,11 @@ Ingestion of N3C's OMOP data source into OWL and SemanticSQL.
 * Python 3.9+
 * Docker
 * [`robot`](http://robot.obolibrary.org/) (if not using `--method yarrrml`)
+* [Git Large File Storage (LFS)](https://git-lfs.com/)
 
 ## Installation
-Run: `make install`  
-
+1. Set up a virtual environment and activate it.
+2. Run: `make install`  
 This will install everything for `--method robot`. If using `--method robot`, do `make install-yarrrml-method`.
 
 ## Running
