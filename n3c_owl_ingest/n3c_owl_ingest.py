@@ -113,7 +113,7 @@ ROBOT_SUBHEADER = {
     'invalid_reason': 'A OMOP:invalid_reason',
     'rdfs:subClassOf': 'SC % SPLIT=|',
 }
-REL_PRED_MAP = {
+REL_PRED_REVERSAL_MAP = {
     'Subsumes': 'rdfs:subClassOf',
     'RxNorm inverse is a': 'rdfs:subClassOf',
 }
@@ -129,7 +129,7 @@ def _run_robot(command: str):
         print(result_stderr, file=sys.stderr)
 
 
-def _convert_semsql(owl_outpath: str, quiet=False):
+def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 60):
     """Convert to SemanticSQL"""
     if not quiet:
         print(f' - converting to SemanticSQL')
@@ -141,6 +141,7 @@ def _convert_semsql(owl_outpath: str, quiet=False):
     # Run
     command = f'{DOCKER_PATH} run ' \
               f'-v {IO_DIR}:/work ' \
+              f"-e ROBOT_JAVA_ARGS='-Xmx{str(memory)}G'" \
               f'-w /work ' \
               f'obolibrary/odkfull:dev ' \
               f'semsql -v make ' \
@@ -163,7 +164,7 @@ def _cleanup_leftover_semsql_intermediates():
 
 def _robot_method_outputs(
     df: pd.DataFrame, rel_maps: REL_MAPS, outpath: Union[Path, str], robot_subheader: Dict[str, str] = ROBOT_SUBHEADER,
-    use_cache=False, skip_semsql=False
+    use_cache=False, skip_semsql=False, memory: int = 60
 ) -> bool:
     """Create robot template and convert to OWL and SemanticSQL
     :returns Whether or not using cached version of OWL"""
@@ -218,7 +219,7 @@ def _robot_method_outputs(
         # Convert to OWL
         print(f' - converting to OWL')
         command = \
-            f'export ROBOT_JAVA_ARGS=-Xmx28G; ' \
+            f'export ROBOT_JAVA_ARGS=-Xmx{str(memory)}G; ' \
             f'"{ROBOT_PATH}" template ' \
             f'--template "{outpath_template}" ' \
             f'--ontology-iri "{ONTOLOGY_IRI}" ' \
@@ -233,7 +234,7 @@ def _robot_method_outputs(
     return using_cached_owl
 
 
-def via_yarrrml(retain_intermediates=True, use_cache=True):
+def via_yarrrml(retain_intermediates=True, use_cache=True, memory: int = 60):
     """Create YARRML yaml and convert to OWL"""
     # todo: consider:
     # capture_output = True, shell = True
@@ -255,7 +256,7 @@ def via_yarrrml(retain_intermediates=True, use_cache=True):
     subprocess.run([
         "docker", "run", "--rm",
         "-v", f"{IO_DIR}:/data",
-        "-e", "JAVA_TOOL_OPTIONS=\"-Xmx28G\"", "--memory", "28g",
+        "-e", f"JAVA_TOOL_OPTIONS=\"-Xmx{str(memory)}G\"", "--memory", f"{str(memory)}g",
         "rmlio/yarrrml-parser:latest",
         "-i", f"/data/{YARRRML_RELPATH}",
         "-o", f"/data/{RML_TEMPLATE_RELPATH}"
@@ -269,7 +270,7 @@ def via_yarrrml(retain_intermediates=True, use_cache=True):
         subprocess.run([
             "docker", "run", "--rm",
             "-v", f"{IO_DIR}:/data",
-            "-e", "JAVA_TOOL_OPTIONS=\"-Xmx28G\"", "--memory", "28g",
+            "-e", f"JAVA_TOOL_OPTIONS=\"-Xmx{str(memory)}G\"", "--memory", f"{str(memory)}g",
             "rmlio/rmlmapper-java:v5.0.0",
             "-m", f"/data/{RML_TEMPLATE_RELPATH}",
             "-o", f"/data/{OUTPATH_NQUADS_RELPATH}"
@@ -279,6 +280,7 @@ def via_yarrrml(retain_intermediates=True, use_cache=True):
     # TODO: implement final conversion step
     print('Step 3/3: Converting nquads to OWL using Apache Jena\'s RIOT. TODO: Not yet implemented.')
     # todo: I have no idea if I need to set this, and if so, whether or not to use export, and what variable to use
+    # todo: these need to use the 'memory' param
     # https://jena.apache.org/documentation/io/#
     # memory_opts = 'MY_JAVA_OPTS="-Xmx26GB"; JAVA_OPTIONS="-Xmx26GB"; JAVA_OPTS="-Xmx26GB"; _JAVA_OPTIONS="-Xmx26GB"; ' \
     #               'JAVA_TOOL_OPTIONS="-Xmx26GB"; export MY_JAVA_OPTS="-Xmx26GB"; export JAVA_OPTIONS="-Xmx26GB"; ' \
@@ -316,12 +318,47 @@ def _get_relationship_maps(concept_rel_df: pd.DataFrame, relationships: List[str
     """Get relationship maps"""
     concept_rel_df = concept_rel_df.sort_values(['relationship_id'])
     rel_maps: REL_MAPS = {}
-    relationships = relationships if relationships != ['ALL'] else concept_rel_df.relationship_id.unique()
+    rels = relationships if relationships != ['ALL'] else concept_rel_df.relationship_id.unique()
+    # XML namespace encoding. See: https://github.com/HOT-Ecosystem/n3c-owl-ingest/issues/10
+    # - allowed: : _ - .
+    rels = [
+        x.replace(" ", "_")
+        .replace("\t", "_")
+        .replace("\n", "_")
+        .replace(",", "_")
+        .replace("|", "_")
+        .replace(";", "_")
+        .replace("/", ".")
+        .replace("\\", ".")
+        .replace("~", "-")
+        .replace("`", "-")
+        .replace("!", "-")
+        .replace("@", "-")
+        .replace("#", "-")
+        .replace("$", "-")
+        .replace("%", "-")
+        .replace("^", "-")
+        .replace("*", "-")
+        .replace("+", "-")
+        .replace("=", "-")
+        .replace("?", "-")
+        .replace("'", "-")
+        .replace('"', "-")
+        .replace("(", "-")
+        .replace(")", "-")
+        .replace("[", "-")
+        .replace("]", "-")
+        .replace("{", "-")
+        .replace("}", "-")
+        .replace("<", "-")
+        .replace(">", "-")
+        for x in rels
+    ]
     # todo: any way to increase performance?
-    for i, rel in enumerate(relationships):
-        print(f' - {i + 1} of {len(relationships)}: {rel}')
-        # todo: spaces ok? replace with _?
-        pred: PREDICATE_ID = f'omoprel:{rel.replace(" ", "_")}' if rel not in REL_PRED_MAP else REL_PRED_MAP[rel]
+    for i, rel in enumerate(rels):
+        print(f' - {i + 1} of {len(rels)}: {rel}')
+        # TODO: REL_PRED_REVERSAL_MAP: Might want to add 2 rels for each of these. The rel itself, and its reversal
+        pred: PREDICATE_ID = f'omoprel:{rel}' if rel not in REL_PRED_REVERSAL_MAP else REL_PRED_REVERSAL_MAP[rel]
         # pred: PREDICATE_ID = f'omoprel:{rel}' if rel not in REL_PRED_MAP else REL_PRED_MAP[rel]
         rel_maps[pred] = {}
         df_i = concept_rel_df[concept_rel_df.relationship_id == rel]
@@ -391,7 +428,7 @@ def _get_core_ojbects(
     print('Grouping relationships...')
     rel_maps: REL_MAPS = _get_relationship_maps(concept_rel_df, relationships, concept_ids)
     t_4b = datetime.now()
-    print('Grouped relationships in ', (t_4b - t_4a).seconds, 'seconds')
+    print('Grouped relationships in', (t_4b - t_4a).seconds, 'seconds')
 
     # Filter out singletons
     if exclude_singletons:
@@ -424,15 +461,15 @@ def _fix_header(header_lines: List[str]) -> str:
 def via_robot(
     outpath: str, split_by_vocab: bool = False, split_by_vocab_merge_after: bool = False, vocabs: List[str] = [],
     concept_csv_path: str = CONCEPT_CSV, concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_CSV,
-    relationships: List[str] = ['Subsumes'], use_cache=False, skip_semsql: bool = False, exclude_singletons: bool = False
+    relationships: List[str] = ['Subsumes'], use_cache=False, skip_semsql: bool = False,
+    exclude_singletons: bool = False, memory: int = 60
 ):
     """Via robot"""
     concept_df, rel_maps = _get_core_ojbects(
         outpath, vocabs, relationships, exclude_singletons, concept_csv_path, concept_relationship_csv_path, use_cache)
-    if vocabs:
-        return _robot_method_outputs(concept_df, rel_maps, outpath, use_cache=use_cache, skip_semsql=skip_semsql)
-    elif not split_by_vocab:
-        return _robot_method_outputs(concept_df, rel_maps, outpath, use_cache=use_cache, skip_semsql=skip_semsql)
+    if vocabs or not split_by_vocab:
+        return _robot_method_outputs(
+            concept_df, rel_maps, outpath, use_cache=use_cache, skip_semsql=skip_semsql, memory=memory)
     # - Split by vocab
     # -- Create outputs by vocab
     grouped = concept_df.groupby('vocabulary_id')
@@ -451,7 +488,7 @@ def via_robot(
             # todo: The way this is, it makes it maybe look like there is an option in the CLI to allow the user to
             #  include semsql output when doing all-merged-post-split, but that's not the case.
             using_cached_owl = _robot_method_outputs(
-                group_df, rel_maps, vocab_outpath, use_cache=use_cache,
+                group_df, rel_maps, vocab_outpath, use_cache=use_cache, memory=memory,
                 skip_semsql=True if split_by_vocab_merge_after else skip_semsql)
             if not using_cached_owl:
                 uncached_owl_exists = True
@@ -488,14 +525,14 @@ def via_robot(
                         raise e
     if not (os.path.exists(outpath.replace('.owl', '.db')) and use_cache):
         print(f'Converting to SemanticSQL')
-        _convert_semsql(outpath, quiet=True)
+        _convert_semsql(outpath, quiet=True, memory=memory)
 
 
 def main_ingest(
     split_by_vocab: bool = False, split_by_vocab_merge_after: bool = False, concept_csv_path: str = CONCEPT_CSV,
     concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_CSV, vocabs: List[str] = [],
     relationships: List[str] = ['Subsumes'], method=['yarrrml', 'robot'][1], use_cache=False, skip_semsql: bool = False,
-    exclude_singletons: bool = False
+    exclude_singletons: bool = False, memory: int = 60
 ):
     """Run the ingest"""
     # Basic setup
@@ -517,11 +554,11 @@ def main_ingest(
     elif method == 'yarrrml':
         print('Warning: YARRRML method still has some bugs, e.g. the ones listed here which do not exist for robot '
               'method: https://github.com/jhu-bids/TermHub/issues/314', file=sys.stderr)
-        return via_yarrrml()
+        return via_yarrrml(memory=memory)
     # Robot method
     return via_robot(
         outpath, split_by_vocab, split_by_vocab_merge_after, vocabs, concept_csv_path, concept_relationship_csv_path,
-        relationships, use_cache, skip_semsql, exclude_singletons)
+        relationships, use_cache, skip_semsql, exclude_singletons, memory)
 
 
 def cli():
@@ -542,6 +579,8 @@ def cli():
     parser.add_argument(
         '-m', '--method', required=False, default='robot', choices=['robot', 'yarrrml'],
         help='What tooling / method to use to generate output?')
+    parser.add_argument(
+        '-M', '--memory', required=False, default=60, help='The amount of Java memory (GB) to allocate. Default is 60.')
     parser.add_argument(
         '-v', '--vocabs', required=False, nargs='+',
         help='Used with `--output-type specific-vocabs-merged`. Which vocabularies to include in the output?  Usage: '
@@ -565,6 +604,7 @@ def cli():
         '-C', '--use-cache', required=False, action='store_true',
         help='Of outputs or intermediates already exist, use them.')
 
+    # TODO: Need to switch to **kwargs for most of below
     d = vars(parser.parse_args())
     if d['semsql_only']:
         # todo: excessive customization for rxnorm here is code smell. what if rxnorm + atc situation changes?
@@ -572,24 +612,25 @@ def cli():
         outpath = OUTPATH_OWL if not vocabs \
             else OUTPATH_OWL.replace('n3c.owl', 'n3c-RxNorm.owl') if 'RxNorm' in vocabs and len(vocabs) < 3 \
             else OUTPATH_OWL.replace('n3c.owl', f'n3c-{"-".join(vocabs)}.owl')
-        _convert_semsql(outpath)
+        _convert_semsql(outpath, memory=d['memory'])
     elif d['output_type'] == 'split':
         main_ingest(
             split_by_vocab=True, method='robot', use_cache=d['use_cache'], concept_csv_path=d['concept_csv_path'],
             concept_relationship_csv_path=d['concept_relationship_csv_path'], skip_semsql=d['skip_semsql'],
-            exclude_singletons=d['exclude_singletons'], relationships=d['relationships'], vocabs=d['vocabs'])
+            exclude_singletons=d['exclude_singletons'], relationships=d['relationships'], vocabs=d['vocabs'],
+            memory=d['memory'])
     elif d['output_type'] == 'merged-post-split':
         main_ingest(
             split_by_vocab=True, split_by_vocab_merge_after=True, method='robot', use_cache=d['use_cache'],
             concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
             skip_semsql=d['skip_semsql'], exclude_singletons=d['exclude_singletons'], relationships=d['relationships'],
-            vocabs=d['vocabs'])
+            vocabs=d['vocabs'], memory=d['memory'])
     elif d['output_type'] == 'merged':
         # TODO: should this value error still exist?
         if d['concept_csv_path'] != CONCEPT_CSV or d['concept_relationship_csv_path'] != CONCEPT_RELATIONSHIP_CSV:
             raise ValueError('Not implemented yet: Custom concept CSVs with all-merged output.')
         main_ingest(
-            split_by_vocab=False, use_cache=d['use_cache'], skip_semsql=d['skip_semsql'],
+            split_by_vocab=False, use_cache=d['use_cache'], skip_semsql=d['skip_semsql'], memory=d['memory'],
             exclude_singletons=d['exclude_singletons'], relationships=d['relationships'], vocabs=d['vocabs'])
     elif d['output_type'] == 'rxnorm':
         # rxnorm_ingest(concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'])
@@ -597,7 +638,7 @@ def cli():
             split_by_vocab=True, method='robot', vocabs=['RxNorm', 'ATC'], use_cache=d['use_cache'],
             relationships=['Subsumes', 'Maps to', 'RxNorm inverse is a'], skip_semsql=d['skip_semsql'],
             concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            exclude_singletons=d['exclude_singletons'])
+            exclude_singletons=d['exclude_singletons'], memory=d['memory'])
 
 
 if __name__ == '__main__':

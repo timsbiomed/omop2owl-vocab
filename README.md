@@ -6,6 +6,7 @@ Ingestion of N3C's OMOP data source into OWL and SemanticSQL.
 * Docker
 * [`robot`](http://robot.obolibrary.org/) (if not using `--method yarrrml`)
 * [Git Large File Storage (LFS)](https://git-lfs.com/)
+* A large amount of memory (see in "caveats")
 
 ## Installation
 1. Set up a virtual environment and activate it.
@@ -17,7 +18,12 @@ This will install everything for `--method robot`. If using `--method robot`, do
 Run: `make all`
 
 ### Caveats
-- `--method yarrrml` is in development and currently generates incorrect output.
+#### Memory requirements
+Running with defaults takes somewhere between 28-50gb, and this only includes the "Subsumes" relationship type. There 
+are 411 total relationship types, thusly requiring more memory as you add more. 
+
+#### `--method yarrrml`
+This is in development and currently generates incorrect output.
 
 ### CLI
 ```
