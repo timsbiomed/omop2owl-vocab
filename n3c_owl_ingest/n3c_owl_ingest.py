@@ -129,7 +129,7 @@ def _run_robot(command: str):
         print(result_stderr, file=sys.stderr)
 
 
-def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 60):
+def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 100):
     """Convert to SemanticSQL"""
     if not quiet:
         print(f' - converting to SemanticSQL')
@@ -141,7 +141,7 @@ def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 60):
     # Run
     command = f'{DOCKER_PATH} run ' \
               f'-v {IO_DIR}:/work ' \
-              f"-e ROBOT_JAVA_ARGS='-Xmx{str(memory)}G'" \
+              f"-e ROBOT_JAVA_ARGS='-Xmx{str(memory)}G' " \
               f'-w /work ' \
               f'obolibrary/odkfull:dev ' \
               f'semsql -v make ' \
@@ -164,7 +164,7 @@ def _cleanup_leftover_semsql_intermediates():
 
 def _robot_method_outputs(
     df: pd.DataFrame, rel_maps: REL_MAPS, outpath: Union[Path, str], robot_subheader: Dict[str, str] = ROBOT_SUBHEADER,
-    use_cache=False, skip_semsql=False, memory: int = 60
+    use_cache=False, skip_semsql=False, memory: int = 100
 ) -> bool:
     """Create robot template and convert to OWL and SemanticSQL
     :returns Whether or not using cached version of OWL"""
@@ -234,7 +234,7 @@ def _robot_method_outputs(
     return using_cached_owl
 
 
-def via_yarrrml(retain_intermediates=True, use_cache=True, memory: int = 60):
+def via_yarrrml(retain_intermediates=True, use_cache=True, memory: int = 100):
     """Create YARRML yaml and convert to OWL"""
     # todo: consider:
     # capture_output = True, shell = True
@@ -462,7 +462,7 @@ def via_robot(
     outpath: str, split_by_vocab: bool = False, split_by_vocab_merge_after: bool = False, vocabs: List[str] = [],
     concept_csv_path: str = CONCEPT_CSV, concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_CSV,
     relationships: List[str] = ['Subsumes'], use_cache=False, skip_semsql: bool = False,
-    exclude_singletons: bool = False, memory: int = 60
+    exclude_singletons: bool = False, memory: int = 100
 ):
     """Via robot"""
     concept_df, rel_maps = _get_core_ojbects(
@@ -532,7 +532,7 @@ def main_ingest(
     split_by_vocab: bool = False, split_by_vocab_merge_after: bool = False, concept_csv_path: str = CONCEPT_CSV,
     concept_relationship_csv_path: str = CONCEPT_RELATIONSHIP_CSV, vocabs: List[str] = [],
     relationships: List[str] = ['Subsumes'], method=['yarrrml', 'robot'][1], use_cache=False, skip_semsql: bool = False,
-    exclude_singletons: bool = False, memory: int = 60
+    exclude_singletons: bool = False, memory: int = 100
 ):
     """Run the ingest"""
     # Basic setup
@@ -580,7 +580,7 @@ def cli():
         '-m', '--method', required=False, default='robot', choices=['robot', 'yarrrml'],
         help='What tooling / method to use to generate output?')
     parser.add_argument(
-        '-M', '--memory', required=False, default=60, help='The amount of Java memory (GB) to allocate. Default is 60.')
+        '-M', '--memory', required=False, default=100, help='The amount of Java memory (GB) to allocate. Default is 100.')
     parser.add_argument(
         '-v', '--vocabs', required=False, nargs='+',
         help='Used with `--output-type specific-vocabs-merged`. Which vocabularies to include in the output?  Usage: '
