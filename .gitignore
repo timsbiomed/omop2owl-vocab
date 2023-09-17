@@ -12,5 +12,26 @@ __pycache__/
 # Specialized
 _archive/
 *ignore/
-*termhub-csets/
-io/release/
+
+# Test
+test/output/
+
+# More
+/*.json
+/*.owl
+/env/*
+/.idea/
+/.run/
+/venv/
+cache/*
+_dev/
+backup/
+build/
+dist/
+ignored/
+*~$*
+*.DS_Store
+*.egg-info
+*.swp
+MANIFEST
+tags
