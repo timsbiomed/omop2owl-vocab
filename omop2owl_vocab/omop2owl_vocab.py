@@ -38,9 +38,7 @@ PROJECT_DIR = SRC_DIR.parent
 # DOCKER_PATH = '/usr/local/bin/docker'
 ROBOT_PATH = 'robot'
 DOCKER_PATH = 'docker'
-IO_DIR = PROJECT_DIR / 'io'
-INPUT_DIR = PROJECT_DIR / IO_DIR / 'input'
-PREFIXES_CSV = INPUT_DIR / 'prefixes.csv'
+PREFIXES_CSV = SRC_DIR / 'prefixes.csv'
 PREFIX_MAP = {
     'omoprel': 'https://w3id.org/cpont/omop/relations/',
     'OMOP': 'https://athena.ohdsi.org/search-terms/terms/',
@@ -107,12 +105,13 @@ DESC = 'Convert OMOP vocabularies to OWL and SemanticSQL.'
 
 def _run_command(command: str):
     results = subprocess.run(command, capture_output=True, shell=True)
-    result_stdout = str(results.stdout.decode()).strip()
-    result_stderr = str(results.stderr.decode()).strip()
-    if result_stdout:
-        print(result_stdout)
-    if result_stderr:
-        print(result_stderr, file=sys.stderr)
+    out = str(results.stdout.decode()).strip()
+    err = str(results.stderr.decode()).strip()
+    if out:
+        print(out)
+    if err:
+        print(err, file=sys.stderr)
+    return out, err
 
 
 def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 100):
@@ -138,7 +137,13 @@ def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 100):
               f'{stacktrace_str}semsql -v make ' \
               f'{outfile} ' \
               f'-P {prefixes_path}'
-    _run_command(command)
+    out, err = _run_command(command)
+    # todo: I'm not sure why this error is happening when using omop2owl as a packge only
+    # docker: Error response from daemon: failed to create shim task: OCI runtime create failed: runc create failed:
+    # unable to start container process: exec: "RUST_BACKTRACE=full": executable file not found in $PATH: unknown.
+    if err and f'unable to start container process: exec: "{stacktrace_str.strip()}"' in err:
+        _run_command(command.replace(stacktrace_str, ''))
+
     # Cleanup
     intermediate_patterns = ['.db.tmp', '-relation-graph.tsv.gz']
     for pattern in intermediate_patterns:
@@ -149,7 +154,7 @@ def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 100):
 
 
 # TODO: also clean up copied over prefixes.csv?
-def _cleanup_leftover_semsql_intermediates(_dir=str(IO_DIR)):
+def _cleanup_leftover_semsql_intermediates(_dir):
     """Cleanup leftover intermediate files created by SemanticSQL"""
     semsql_template_path = os.path.join(_dir, '.template.db')
     if os.path.exists(semsql_template_path):
@@ -412,6 +417,7 @@ def run(
     """Run the ingest"""
     # Basic setup
     _cleanup_leftover_semsql_intermediates(outdir)
+    outdir = outdir if os.path.isabs(outdir) else os.path.join(os.getcwd(), outdir)
     os.makedirs(outdir, exist_ok=True)
     outpath: str = _get_merged_file_outpath(outdir, ontology_id, vocabs)
     ontology_iri = f'http://purl.obolibrary.org/obo/{ontology_id}/ontology'
@@ -494,9 +500,9 @@ def run(
         _convert_semsql(outpath, quiet=True, memory=memory)
 
 
-def cli():
+def cli(title: str = PROG, description: str = DESC):
     """Command line interface."""
-    parser = ArgumentParser(prog=PROG, description=DESC)
+    parser = ArgumentParser(prog=title, description=description)
     # Required
     parser.add_argument(
         '-c', '--concept-csv-path', required=False, help='Path to CSV of OMOP concept table.')
