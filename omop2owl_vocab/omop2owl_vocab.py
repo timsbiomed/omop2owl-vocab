@@ -38,9 +38,7 @@ PROJECT_DIR = SRC_DIR.parent
 # DOCKER_PATH = '/usr/local/bin/docker'
 ROBOT_PATH = 'robot'
 DOCKER_PATH = 'docker'
-IO_DIR = PROJECT_DIR / 'io'
-INPUT_DIR = PROJECT_DIR / IO_DIR / 'input'
-PREFIXES_CSV = INPUT_DIR / 'prefixes.csv'
+PREFIXES_CSV = SRC_DIR / 'prefixes.csv'
 PREFIX_MAP = {
     'omoprel': 'https://w3id.org/cpont/omop/relations/',
     'OMOP': 'https://athena.ohdsi.org/search-terms/terms/',
@@ -149,7 +147,7 @@ def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 100):
 
 
 # TODO: also clean up copied over prefixes.csv?
-def _cleanup_leftover_semsql_intermediates(_dir=str(IO_DIR)):
+def _cleanup_leftover_semsql_intermediates(_dir):
     """Cleanup leftover intermediate files created by SemanticSQL"""
     semsql_template_path = os.path.join(_dir, '.template.db')
     if os.path.exists(semsql_template_path):
@@ -412,6 +410,7 @@ def run(
     """Run the ingest"""
     # Basic setup
     _cleanup_leftover_semsql_intermediates(outdir)
+    outdir = outdir if os.path.isabs(outdir) else os.path.join(os.getcwd(), outdir)
     os.makedirs(outdir, exist_ok=True)
     outpath: str = _get_merged_file_outpath(outdir, ontology_id, vocabs)
     ontology_iri = f'http://purl.obolibrary.org/obo/{ontology_id}/ontology'
