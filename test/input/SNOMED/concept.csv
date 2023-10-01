@@ -1,0 +1,21 @@
+concept_id,concept_name,domain_id,vocabulary_id,concept_class_id,standard_concept,concept_code,valid_start_date,valid_end_date,invalid_reason
+8715,Hospital admission,Observation,SNOMED,Procedure,S,32485007,2002-01-31,2099-12-31,
+9173,Inactive,Observation,SNOMED,Qualifier Value,S,73425007,2002-01-31,2099-12-31,
+9174,Obsolete,Observation,SNOMED,Qualifier Value,S,41228009,2002-01-31,2099-12-31,
+9175,UNKNOWN,Observation,SNOMED,Patient Status,,261665005,1970-01-01,2013-01-30,D
+9176,"Patient status determination, deceased",Condition,SNOMED,Clinical Finding,S,18632008,2002-01-31,2099-12-31,
+9177,Other,Observation,SNOMED,Qualifier Value,S,74964007,2002-01-31,2099-12-31,
+9181,Active,Observation,SNOMED,Qualifier Value,S,55561003,2002-01-31,2099-12-31,
+9188,Final report,Type Concept,SNOMED,Admin Concept,,281321000,2002-01-31,2010-07-31,U
+9189,Negative,Meas Value,SNOMED,Qualifier Value,S,260385009,2002-01-31,2099-12-31,
+9190,Not detected,Meas Value,SNOMED,Qualifier Value,S,260415000,2002-01-31,2099-12-31,
+9191,Positive,Meas Value,SNOMED,Qualifier Value,S,10828004,2002-01-31,2099-12-31,
+9192,Trace,Meas Value,SNOMED,Qualifier Value,S,260405006,2002-01-31,2099-12-31,
+22274,Neoplasm of uncertain behavior of larynx,Condition,SNOMED,Clinical Finding,S,94899001,2002-01-31,2099-12-31,
+22281,Sickle cell-hemoglobin SS disease,Condition,SNOMED,Clinical Finding,S,127040003,2002-01-31,2099-12-31,
+22288,Hereditary elliptocytosis,Condition,SNOMED,Clinical Finding,S,191169008,2002-01-31,2099-12-31,
+22340,Esophageal varices without bleeding,Condition,SNOMED,Clinical Finding,S,14223005,2002-01-31,2099-12-31,
+22350,Edema of larynx,Condition,SNOMED,Clinical Finding,S,51599000,2002-01-31,2099-12-31,
+22426,Congenital macrostomia,Condition,SNOMED,Clinical Finding,S,40159009,2002-01-31,2099-12-31,
+22492,Foreign body in pharynx,Condition,SNOMED,Clinical Finding,S,25479004,2002-01-31,2099-12-31,
+22557,Malignant tumor of submandibular gland,Condition,SNOMED,Clinical Finding,S,363380002,2002-01-31,2099-12-31,

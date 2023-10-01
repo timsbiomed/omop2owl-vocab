@@ -1,0 +1,21 @@
+concept_id,concept_name,domain_id,vocabulary_id,concept_class_id,standard_concept,concept_code,valid_start_date,valid_end_date,invalid_reason
+501343,hepatitis B immune globulin,Drug,RxNorm,Ingredient,S,26744,1970-01-01,2099-12-31,
+501345,hepatitis B immune globulin 217 UNT/ML,Drug,RxNorm,Clinical Drug Comp,S,353465,1970-01-01,2099-12-31,
+501346,hepatitis B immune globulin 200 UNT/ML Injectable Solution,Drug,RxNorm,Clinical Drug,S,412674,1970-01-01,2099-12-31,
+501347,hepatitis B immune globulin 50 UNT/ML Injectable Solution,Drug,RxNorm,Clinical Drug,S,412675,1970-01-01,2099-12-31,
+501415,0.5 ML hepatitis B immune globulin 217 UNT/ML Prefilled Syringe [Bayhep B],Drug,RxNorm,Quant Branded Drug,S,825138,2008-11-30,2099-12-31,
+501416,1 ML hepatitis B immune globulin 217 UNT/ML Prefilled Syringe,Drug,RxNorm,Quant Clinical Drug,S,825139,2008-11-30,2099-12-31,
+501418,HEPATITIS B IMMUNE GLOBULIN 208 UNT/ML,Drug,RxNorm,Clinical Drug Comp,,825145,2008-11-30,2010-07-04,U
+501419,HEPATITIS B IMMUNE GLOBULIN 208 UNT/ML Injectable Solution,Drug,RxNorm,Clinical Drug,,825146,2008-11-30,2016-03-11,D
+501420,HEPATITIS B IMMUNE GLOBULIN 208 UNT/ML Injectable Solution [Nabi-HB],Drug,RxNorm,Branded Drug,,825149,2008-11-30,2016-03-11,D
+501421,hepatitis B immune globulin 220 UNT/ML,Drug,RxNorm,Clinical Drug Comp,S,825152,2008-11-30,2099-12-31,
+501482,hepatitis B immune globulin 220 UNT/ML Injectable Solution,Drug,RxNorm,Clinical Drug,,825153,2008-11-30,2016-03-11,D
+501483,hepatitis B immune globulin 220 UNT/ML Injectable Solution [Hyperhep B],Drug,RxNorm,Branded Drug,,825156,2008-11-30,2016-03-11,D
+501484,0.5 ML hepatitis B immune globulin 220 UNT/ML Prefilled Syringe,Drug,RxNorm,Quant Clinical Drug,S,825157,2008-11-30,2099-12-31,
+501485,0.5 ML hepatitis B immune globulin 220 UNT/ML Prefilled Syringe [Hyperhep B],Drug,RxNorm,Quant Branded Drug,S,825159,2008-11-30,2099-12-31,
+501487,1 ML hepatitis B immune globulin 220 UNT/ML Prefilled Syringe [Hyperhep B],Drug,RxNorm,Quant Branded Drug,S,825161,2008-11-30,2099-12-31,
+501488,Hepatitis B Vaccine,Drug,RxNorm,Ingredient,,26746,1970-01-01,2016-03-11,U
+501523,Hepatitis B Vaccine 0.01 MG/ML,Drug,RxNorm,Clinical Drug Comp,,328556,1970-01-01,2016-03-11,U
+501524,Hepatitis B Vaccine 0.02 MG/ML,Drug,RxNorm,Clinical Drug Comp,,328559,1970-01-01,2016-03-11,U
+501528,0.5 ML HEPATITIS B VACCINE (RECOMBINANT) 0.02 MG/ML Prefilled Syringe,Drug,RxNorm,Clinical Drug,,763313,2008-03-30,2011-12-04,U
+505117,intramuscular immunoglobulin,Drug,RxNorm,Precise Ingredient,,108067,1970-01-01,2099-12-31,
