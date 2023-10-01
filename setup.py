@@ -15,7 +15,7 @@ URL = 'https://github.com/HOT-Ecosystem/omop2owl-vocab/'
 EMAIL = 'jflack@jhu.edu'
 AUTHOR = 'Joe Flack'
 REQUIRES_PYTHON = '>=3.9.0'
-VERSION = '1.0.1'
+VERSION = '1.3.1'
 
 # Requirements
 REQUIRED = [
@@ -77,7 +77,8 @@ setup(
     packages=find_packages(exclude=('test',)),
     package_data={
         'omop2owl_vocab': [
-            'io/input/prefixes.csv',
+            'omop2owl_vocab/prefixes.csv',
+            'omop2owl_vocab/robot.jar',
         ]
     },
     install_requires=REQUIRED,
