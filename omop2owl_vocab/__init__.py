@@ -1,7 +1,7 @@
 """N3C OMOP to OWL"""
 from datetime import datetime
 
-from omop2owl_vocab.omop2owl_vocab import cli, CONCEPT_DTYPES, CONCEPT_RELATIONSHIP_DTYPES, run
+from omop2owl_vocab.omop2owl_vocab import cli, CONCEPT_DTYPES, CONCEPT_RELATIONSHIP_DTYPES, omop2owl
 
 
 if __name__ == '__main__':

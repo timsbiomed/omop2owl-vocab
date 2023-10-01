@@ -22,7 +22,7 @@ TEMP_CONCEPT_CSV = '/Users/joeflack4/projects/TermHub/termhub-csets/datasets/pre
 TEMP_CONCEPT_REL_CSV = '/Users/joeflack4/projects/TermHub/termhub-csets/datasets/prepped_files/concept_relationship.csv'
 PROJECT_ROOT = TEST_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-from omop2owl_vocab import CONCEPT_DTYPES, CONCEPT_RELATIONSHIP_DTYPES, run
+from omop2owl_vocab import CONCEPT_DTYPES, CONCEPT_RELATIONSHIP_DTYPES, omop2owl
 
 
 def _create_test_files(
@@ -114,7 +114,7 @@ class TestOmop2Owl(unittest.TestCase):
         }
 
         # Run program
-        run(**settings)
+        omop2owl(**settings)
 
         # Tests
         oi: BasicOntologyInterface = get_adapter(db_path)

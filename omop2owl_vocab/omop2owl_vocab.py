@@ -21,7 +21,7 @@ import sys
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, Union
+from typing import Any, Dict, List, Set, Tuple, Union
 
 import pandas as pd
 
@@ -38,9 +38,7 @@ PROJECT_DIR = SRC_DIR.parent
 # DOCKER_PATH = '/usr/local/bin/docker'
 ROBOT_PATH = 'robot'
 DOCKER_PATH = 'docker'
-IO_DIR = PROJECT_DIR / 'io'
-INPUT_DIR = PROJECT_DIR / IO_DIR / 'input'
-PREFIXES_CSV = INPUT_DIR / 'prefixes.csv'
+PREFIXES_CSV = SRC_DIR / 'prefixes.csv'
 PREFIX_MAP = {
     'omoprel': 'https://w3id.org/cpont/omop/relations/',
     'OMOP': 'https://athena.ohdsi.org/search-terms/terms/',
@@ -107,12 +105,13 @@ DESC = 'Convert OMOP vocabularies to OWL and SemanticSQL.'
 
 def _run_command(command: str):
     results = subprocess.run(command, capture_output=True, shell=True)
-    result_stdout = str(results.stdout.decode()).strip()
-    result_stderr = str(results.stderr.decode()).strip()
-    if result_stdout:
-        print(result_stdout)
-    if result_stderr:
-        print(result_stderr, file=sys.stderr)
+    out = str(results.stdout.decode()).strip()
+    err = str(results.stderr.decode()).strip()
+    if out:
+        print(out)
+    if err:
+        print(err, file=sys.stderr)
+    return out, err
 
 
 def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 100):
@@ -138,7 +137,13 @@ def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 100):
               f'{stacktrace_str}semsql -v make ' \
               f'{outfile} ' \
               f'-P {prefixes_path}'
-    _run_command(command)
+    out, err = _run_command(command)
+    # todo: I'm not sure why this error is happening when using omop2owl as a packge only
+    # docker: Error response from daemon: failed to create shim task: OCI runtime create failed: runc create failed:
+    # unable to start container process: exec: "RUST_BACKTRACE=full": executable file not found in $PATH: unknown.
+    if err and f'unable to start container process: exec: "{stacktrace_str.strip()}"' in err:
+        _run_command(command.replace(stacktrace_str, ''))
+
     # Cleanup
     intermediate_patterns = ['.db.tmp', '-relation-graph.tsv.gz']
     for pattern in intermediate_patterns:
@@ -149,7 +154,7 @@ def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 100):
 
 
 # TODO: also clean up copied over prefixes.csv?
-def _cleanup_leftover_semsql_intermediates(_dir=str(IO_DIR)):
+def _cleanup_leftover_semsql_intermediates(_dir):
     """Cleanup leftover intermediate files created by SemanticSQL"""
     semsql_template_path = os.path.join(_dir, '.template.db')
     if os.path.exists(semsql_template_path):
@@ -170,7 +175,7 @@ def _get_merged_file_outpath(outdir: str, ontology_id: str, vocabs: List[str]) -
 def _create_outputs(
     df: pd.DataFrame, rel_maps: REL_MAPS, outpath: Union[Path, str], ontology_iri: str,
     robot_subheader: Dict[str, str] = ROBOT_SUBHEADER, use_cache=False, skip_semsql=False, memory: int = 100,
-    do_fixes=True
+    do_fixes=True, retain_robot_templates=True
 ) -> bool:
     """Create robot template and convert to OWL and SemanticSQL
     :returns Whether or not using cached version of OWL"""
@@ -233,6 +238,9 @@ def _create_outputs(
         for k, v in PREFIX_MAP.items():
             command += f' --prefix "{k}: {v}"'
         _run_command(command)
+
+    if not retain_robot_templates:
+        os.remove(outpath_template)
 
     if do_fixes:
         # Fix issue w/ robot not accepting --prefix'es
@@ -339,7 +347,7 @@ def _get_relationship_maps(concept_rel_df: pd.DataFrame, relationships: List[str
 def _get_core_objects(
     concept_csv_path: str, concept_relationship_csv_path: str, outpath: str, vocabs: List[str] = [], relationships: List[str] = ['Is a'],
     exclude_singletons: bool = False, use_cache=False
-) -> Tuple[pd.DataFrame, REL_MAPS]:
+) -> Tuple[pd.DataFrame, REL_MAPS, str]:
     """Get core objects"""
     t_0 = datetime.now()
     # Load cache
@@ -352,7 +360,7 @@ def _get_core_objects(
             t_1 = datetime.now()
             d = pickle.load(f)
             print('Loaded cached tables and objects in', (t_1 - t_0).seconds, 'seconds')
-            return d['concept_df'], d['rel_maps']
+            return d['concept_df'], d['rel_maps'], cache_path
 
     # Read inputs
     # - concept table
@@ -398,20 +406,23 @@ def _get_core_objects(
     with open(cache_path, 'wb') as f:
         d = {'concept_df': concept_df, 'rel_maps': rel_maps}
         pickle.dump(d, f, protocol=pickle.HIGHEST_PROTOCOL)
-    return concept_df, rel_maps
+    return concept_df, rel_maps, cache_path
 
 
-def run(
+# todo: include semsql in report
+def omop2owl(
     concept_csv_path: str, concept_relationship_csv_path: str, split_by_vocab: bool = False,
     split_by_vocab_merge_after: bool = False, vocabs: List[str] = [],
     relationships: List[str] = ['Is a'], use_cache=False, skip_semsql: bool = False,
     exclude_singletons: bool = False, memory: int = 100,
     ontology_id: str = 'OMOP',  # add str(randint(100000, 999999))?
-    outdir: str = os.getcwd()  # or RELEASE_DIR?
-):
+    outdir: str = os.getcwd(),  # or RELEASE_DIR?
+    retain_rel_cache=True, retain_robot_templates=True
+) -> Union[Dict[str, Any], None]:
     """Run the ingest"""
     # Basic setup
     _cleanup_leftover_semsql_intermediates(outdir)
+    outdir = outdir if os.path.isabs(outdir) else os.path.join(os.getcwd(), outdir)
     os.makedirs(outdir, exist_ok=True)
     outpath: str = _get_merged_file_outpath(outdir, ontology_id, vocabs)
     ontology_iri = f'http://purl.obolibrary.org/obo/{ontology_id}/ontology'
@@ -426,11 +437,15 @@ def run(
         return
 
     # Run
-    concept_df, rel_maps = _get_core_objects(
+    concept_df, rel_maps, cache_path = _get_core_objects(
         concept_csv_path, concept_relationship_csv_path, outpath, vocabs, relationships, exclude_singletons, use_cache)
+    if not retain_rel_cache:
+        os.remove(cache_path)
     if vocabs or not split_by_vocab:
-        return _create_outputs(
-            concept_df, rel_maps, outpath, ontology_iri, use_cache=use_cache, skip_semsql=skip_semsql, memory=memory)
+        _create_outputs(
+            concept_df, rel_maps, outpath, ontology_iri, use_cache=use_cache, skip_semsql=skip_semsql, memory=memory,
+            retain_robot_templates=retain_robot_templates)
+        return
 
     # - Split by vocab
     # -- Create outputs by vocab
@@ -440,11 +455,13 @@ def run(
     name: str
     vocab_outpaths: List[Path] = []
     uncached_owl_exists = False
+    report = {'vocab_outputs': {}, 'combined_output': {ontology_id: outpath}}
     for name, group_df in grouped:
         name = name if name else 'Metadata'  # AFAIK, there's just 1 concept "No matching concept" for this
         t_i1 = datetime.now()
         print(f'Creating outputs {i} of {len(grouped)}: {name}')
         vocab_outpath = Path(outdir) / f'{name}.owl'.replace(' ', '-')
+        report['vocab_outputs'][name] = vocab_outpath
         vocab_outpaths.append(vocab_outpath)
         # noinspection PyBroadException
         try:
@@ -453,7 +470,8 @@ def run(
             #  include semsql output when doing all-merged-post-split, but that's not the case.
             using_cached_owl = _create_outputs(
                 group_df, rel_maps, vocab_outpath, ontology_iri_i, use_cache=use_cache, memory=memory,
-                skip_semsql=True if split_by_vocab_merge_after else skip_semsql)
+                skip_semsql=True if split_by_vocab_merge_after else skip_semsql,
+                retain_robot_templates=retain_robot_templates)
             if not using_cached_owl:
                 uncached_owl_exists = True
         except Exception:
@@ -489,14 +507,56 @@ def run(
                     except Exception as e:
                         os.remove(outpath)
                         raise e
-    if not (os.path.exists(outpath.replace('.owl', '.db')) and use_cache):
+
+    if not skip_semsql and not (os.path.exists(outpath.replace('.owl', '.db')) and use_cache):
         print(f'Converting to SemanticSQL')
         _convert_semsql(outpath, quiet=True, memory=memory)
+    return report
 
 
-def cli():
-    """Command line interface."""
-    parser = ArgumentParser(prog=PROG, description=DESC)
+# todo: This really shouldn't exist. Need to refactor to simply improve 'run' so that this is not needed.
+def route_and_run(d: Dict):
+    """Translate arguments to determine how to run program."""
+    # TODO: Need to switch to **kwargs for most of below
+    if d['install']:
+        _run_command('docker pull obolibrary/odkfull:dev')
+        print('Installation complete. Exiting.')
+        return
+    if not d['concept_csv_path'] or not d['concept_relationship_csv_path']:
+        raise RuntimeError('Must pass --concept-csv-path and --concept-relationship-csv-path')
+    if d['semsql_only']:
+        outpath: str = _get_merged_file_outpath(d['outdir'], d['ontology_id'], d['vocabs'])
+        _convert_semsql(outpath, memory=d['memory'])
+    elif d['output_type'] == 'split':
+        omop2owl(
+            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
+            split_by_vocab=True, use_cache=d['use_cache'], skip_semsql=d['skip_semsql'],
+            exclude_singletons=d['exclude_singletons'], relationships=d['relationships'], vocabs=d['vocabs'],
+            memory=d['memory'], outdir=d['outdir'])
+    elif d['output_type'] == 'merged-post-split':  # Default
+        omop2owl(
+            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
+            split_by_vocab=True, split_by_vocab_merge_after=True, use_cache=d['use_cache'],
+            skip_semsql=d['skip_semsql'], exclude_singletons=d['exclude_singletons'], relationships=d['relationships'],
+            vocabs=d['vocabs'], memory=d['memory'], outdir=d['outdir'])
+    elif d['output_type'] == 'merged':
+        omop2owl(
+            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
+            split_by_vocab=False, use_cache=d['use_cache'], skip_semsql=d['skip_semsql'], memory=d['memory'],
+            exclude_singletons=d['exclude_singletons'], relationships=d['relationships'], vocabs=d['vocabs'],
+            outdir=d['outdir'])
+    elif d['output_type'] == 'rxnorm':
+        # rxnorm_ingest(concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'])
+        omop2owl(
+            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
+            split_by_vocab=True, vocabs=['RxNorm', 'ATC'], use_cache=d['use_cache'],
+            relationships=['Is a', 'Maps to', 'RxNorm inverse is a'], skip_semsql=d['skip_semsql'],
+            exclude_singletons=d['exclude_singletons'], memory=d['memory'], outdir=d['outdir'])
+
+
+def cli_parser(title: str = PROG, description: str = DESC) -> ArgumentParser:
+    """Get CLI parser"""
+    parser = ArgumentParser(prog=title, description=description)
     # Required
     parser.add_argument(
         '-c', '--concept-csv-path', required=False, help='Path to CSV of OMOP concept table.')
@@ -543,43 +603,14 @@ def cli():
     parser.add_argument(
         '-M', '--memory', required=False, default=100, help='The amount of Java memory (GB) to allocate.')
     parser.add_argument('-i', '--install', action='store_true', help='Installs necessary docker images.')
+    return parser
 
-    # TODO: Need to switch to **kwargs for most of below
+
+def cli(title: str = PROG, description: str = DESC):
+    """Command line interface."""
+    parser: ArgumentParser = cli_parser(title, description)
     d = vars(parser.parse_args())
-    if d['install']:
-        _run_command('docker pull obolibrary/odkfull:dev')
-        print('Installation complete. Exiting.')
-        return
-    if not d['concept_csv_path'] or not d['concept_relationship_csv_path']:
-        raise RuntimeError('Must pass --concept-csv-path and --concept-relationship-csv-path')
-    if d['semsql_only']:
-        outpath: str = _get_merged_file_outpath(d['outdir'], d['ontology_id'], d['vocabs'])
-        _convert_semsql(outpath, memory=d['memory'])
-    elif d['output_type'] == 'split':
-        run(
-            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            split_by_vocab=True, use_cache=d['use_cache'], skip_semsql=d['skip_semsql'],
-            exclude_singletons=d['exclude_singletons'], relationships=d['relationships'], vocabs=d['vocabs'],
-            memory=d['memory'], outdir=d['outdir'])
-    elif d['output_type'] == 'merged-post-split':  # Default
-        run(
-            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            split_by_vocab=True, split_by_vocab_merge_after=True, use_cache=d['use_cache'],
-            skip_semsql=d['skip_semsql'], exclude_singletons=d['exclude_singletons'], relationships=d['relationships'],
-            vocabs=d['vocabs'], memory=d['memory'], outdir=d['outdir'])
-    elif d['output_type'] == 'merged':
-        run(
-            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            split_by_vocab=False, use_cache=d['use_cache'], skip_semsql=d['skip_semsql'], memory=d['memory'],
-            exclude_singletons=d['exclude_singletons'], relationships=d['relationships'], vocabs=d['vocabs'],
-            outdir=d['outdir'])
-    elif d['output_type'] == 'rxnorm':
-        # rxnorm_ingest(concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'])
-        run(
-            concept_csv_path=d['concept_csv_path'], concept_relationship_csv_path=d['concept_relationship_csv_path'],
-            split_by_vocab=True, vocabs=['RxNorm', 'ATC'], use_cache=d['use_cache'],
-            relationships=['Is a', 'Maps to', 'RxNorm inverse is a'], skip_semsql=d['skip_semsql'],
-            exclude_singletons=d['exclude_singletons'], memory=d['memory'], outdir=d['outdir'])
+    route_and_run(d)
 
 
 if __name__ == '__main__':
