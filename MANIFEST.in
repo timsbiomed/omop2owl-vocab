@@ -1,0 +1,3 @@
+include README.md
+include omop2owl_vocab/prefixes.csv
+include omop2owl_vocab/robot.jar

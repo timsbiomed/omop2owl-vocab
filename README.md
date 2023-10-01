@@ -2,9 +2,9 @@
 Convert OMOP vocab into OWL and SemanticSQL.
 
 ## Prerequisites
-* Python 3.9+
+* [Python 3.9+](https://www.python.org/downloads/)
+* [Java 11+](https://www.oracle.com/java/technologies/javase/jdk11-archive-downloads.html)
 * Docker
-* [`robot`](http://robot.obolibrary.org/)
 
 ## Installation
 1. `pip install omop2owl-vocab`
