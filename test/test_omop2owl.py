@@ -54,7 +54,7 @@ def _create_test_files(
         concept_rel_df_i.to_csv(str(this_test_dir / 'concept_relationship.csv'), index=False)
 
 class TestOmop2Owl(unittest.TestCase):
-    """Tests for database"""
+    """Tests"""
 
     @staticmethod
     def _prep_combine_test_subsets(use_cache=True, create_fresh_test_files=False) -> Tuple[Path, Path]:
@@ -92,7 +92,7 @@ class TestOmop2Owl(unittest.TestCase):
         """Test default settings, except for including all relationships"""
         # Vars
         concept_outpath, concept_rel_outpath = self._prep_combine_test_subsets()
-        outdir = TEST_OUTPUT_DIR / 'test_defaults'
+        outdir = TEST_OUTPUT_DIR / 'test_defaults_except_all_rels'
         db_path = os.path.join(outdir, 'OMOP.db')
         settings = {
             'concept_csv_path': str(concept_outpath),
@@ -114,6 +114,7 @@ class TestOmop2Owl(unittest.TestCase):
         }
 
         # Run program
+        # todo: delete the owl files too?
         if os.path.exists(db_path):
             os.remove(db_path)
         omop2owl(**settings)

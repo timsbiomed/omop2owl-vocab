@@ -141,6 +141,8 @@ def _convert_semsql(owl_outpath: str, quiet=False, memory: int = 100):
     # unable to start container process: exec: "RUST_BACKTRACE=full": executable file not found in $PATH: unknown.
     if err and f'unable to start container process: exec: "{stacktrace_str.strip()}"' in err:
         _run_command(command.replace(stacktrace_str, ''))
+    elif err:
+        raise RuntimeError(err)
 
     # Cleanup
     intermediate_patterns = ['.db.tmp', '-relation-graph.tsv.gz']
@@ -185,8 +187,16 @@ def _create_outputs(
     # concepts_in_domain = set(df.index)
     outpath_template = str(outpath).replace('.owl', '.robot.template.tsv')
     # rdfs:subClassOf represented always as 'SC' in robot subheader, so handled separately
+
+    # todo#4: ConceptMap getting mappings OK w/ this change?
+    #  originally was doing as annotations. should I still do this for mappings?
+    #  i think there's a good chance SSSOM won't interpret these as mappings... but i should try via passing the flag I'm already passing
+    #  if it doesn't, then I will need to have a short list of which preds are mapping preds, and do annotations for them here instead. i was gonna create such a list anyway
+    heading = "SC {} some % SPLIT=|"
     robot_subheader = \
-        robot_subheader | {k: f'A {k} SPLIT=|' for k in [x for x in rel_maps.keys() if x != 'rdfs:subClassOf']}
+        robot_subheader | {rel_predicate: heading.format(rel_predicate) for rel_predicate in [x for x in rel_maps.keys() if x != 'rdfs:subClassOf']}
+    # robot_subheader = \
+    #     robot_subheader | {rel_predicate: f'A {rel_predicate} SPLIT=|' for rel_predicate in [x for x in rel_maps.keys() if x != 'rdfs:subClassOf']}
 
     if not(os.path.exists(outpath_template) and use_cache):
         print(f' - creating robot template')
@@ -238,7 +248,9 @@ def _create_outputs(
             f'--output "{outpath}"'
         for k, v in PREFIX_MAP.items():
             command += f' --prefix "{k}: {v}"'
-        _run_command(command)
+        out, err = _run_command(command)
+        if (err and 'error' in err.lower()) or (out and 'error' in out.lower()):
+            raise RuntimeError(err)
 
     if not retain_robot_templates:
         os.remove(outpath_template)
@@ -426,7 +438,8 @@ def omop2owl(
     outdir = outdir if os.path.isabs(outdir) else os.path.join(os.getcwd(), outdir)
     os.makedirs(outdir, exist_ok=True)
     outpath: str = _get_merged_file_outpath(outdir, ontology_id, vocabs)
-    ontology_iri = f'http://purl.obolibrary.org/obo/{ontology_id}/ontology'
+    ontology_iri_pattern = 'http://purl.obolibrary.org/obo/{}/ontology'
+    ontology_iri = ontology_iri_pattern.format(ontology_id)
     if isinstance(vocabs, str):
         vocabs = [vocabs]
     if isinstance(relationships, str):
@@ -494,13 +507,16 @@ def omop2owl(
         print(f'Joining vocab .owl files into a single OWL: {outpath}')
         with open(outpath, 'a') as file:
             for i, path in enumerate(vocab_outpaths):
-                print(f' - {i + 1} of {len(vocab_outpaths)}: {os.path.basename(path).replace(".owl", "")}')
+                vocab_name = os.path.basename(path).replace(".owl", "")
+                print(f' - {i + 1} of {len(vocab_outpaths)}: {vocab_name}')
                 with open(path) as vocab_file:
                     try:
                         original_contents = vocab_file.read()
                         header, body, footer = _get_header_body_footer(original_contents)
                         # Header: Do 1x at beginning
                         if i == 0:
+                            # Fix header & write
+                            header = header.replace(ontology_iri_pattern.format(vocab_name), ontology_iri)
                             file.write(header)
                         # Body
                         file.write(body)
@@ -569,7 +585,8 @@ def cli_parser(title: str = PROG, description: str = DESC) -> ArgumentParser:
         help='Path to CSV of OMOP concept_relationship table.')
     # Optional
     parser.add_argument(
-        '-O', '--outdir', required=False, default=os.getcwd(), help='Output directory.')
+        '-O', '--outdir', required=False, default=os.getcwd(),
+        help='Output directory. Defaults to current working directory.')
     # todo:would be good to allow them to pass their own pURL
     parser.add_argument(
         '-I', '--ontology-id', required=False, default='OMOP',  # add str(randint(100000, 999999))?
