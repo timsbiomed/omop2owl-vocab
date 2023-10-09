@@ -376,14 +376,18 @@ def _get_core_objects(
             return d['concept_df'], d['rel_maps'], cache_path
 
     # Read inputs
+    # todo: sep: optimize? N3C OMOP tables are CSV, but Athena ones are TSV. One possible solution is (a) I try/except
+    #  but I went with (b) sep=None, which automatically determines. Only downside to this is it goes from the C engine
+    #  to the Python engine, which I'm assuming is slower.
+    sep = None
     # - concept table
-    concept_df = pd.read_csv(concept_csv_path, index_col='concept_id', dtype=CONCEPT_DTYPES).fillna('')
+    concept_df = pd.read_csv(concept_csv_path, index_col='concept_id', dtype=CONCEPT_DTYPES, sep=sep).fillna('')
     concept_ids: Set[str] = set(concept_df.index)
     t_1 = datetime.now()
     print('Read "concept" table in', (t_1 - t_0).seconds, 'seconds')
 
     # - concept_relationship table
-    concept_rel_df = pd.read_csv(concept_relationship_csv_path, dtype=CONCEPT_RELATIONSHIP_DTYPES).fillna('')
+    concept_rel_df = pd.read_csv(concept_relationship_csv_path, dtype=CONCEPT_RELATIONSHIP_DTYPES, sep=sep).fillna('')
     concept_rel_df = concept_rel_df[concept_rel_df.invalid_reason == '']
     t_2 = datetime.now()
     print('Read "concept_relationships" table in', (t_2 - t_1).seconds, 'seconds')
