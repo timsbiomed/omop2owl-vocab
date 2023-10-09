@@ -15,7 +15,7 @@ URL = 'https://github.com/HOT-Ecosystem/omop2owl-vocab/'
 EMAIL = 'jflack@jhu.edu'
 AUTHOR = 'Joe Flack'
 REQUIRES_PYTHON = '>=3.9.0'
-VERSION = '1.3.2'
+VERSION = '1.3.3'
 
 # Requirements
 REQUIRED = [
