@@ -517,6 +517,13 @@ def omop2owl(
                         if i == 0:
                             # Fix header & write
                             header = header.replace(ontology_iri_pattern.format(vocab_name), ontology_iri)
+                            # todo#4b: caused by 'todo#4', changing relationship implementation from annotations /
+                            #  object properties to subclass relation edges worked to get relationships, but somehow
+                            #  when converted to OWL, it does not see any of the 'omoprel' preds, and does not add
+                            #  'omoprel' to the header. I am passing the prefix map explicitly but it's not working.
+                            #  is this a bug in robot?
+                            ns1 = '     xmlns:OMOP="https://athena.ohdsi.org/search-terms/terms/">'
+                            header = header.replace(ns1, f'     xmlns:omoprel="https://w3id.org/cpont/omop/relations/"\n{ns1}')
                             file.write(header)
                         # Body
                         file.write(body)
