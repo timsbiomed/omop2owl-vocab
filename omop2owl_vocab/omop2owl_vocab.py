@@ -426,6 +426,7 @@ def _get_core_objects(
     return concept_df, rel_maps, cache_path
 
 
+# todo: now 'split_by_vocab' is unused. remove this param? (see 'todo #1')
 # todo: include semsql in report
 def omop2owl(
     concept_csv_path: str, concept_relationship_csv_path: str, split_by_vocab: bool = True,
@@ -436,7 +437,7 @@ def omop2owl(
     outdir: str = os.getcwd(),  # or RELEASE_DIR?
     retain_general_cache=True, retain_robot_templates=False
 ) -> Union[Dict[str, Any], None]:
-    """Run the ingest"""
+    """Run"""
     # Basic setup
     _cleanup_leftover_semsql_intermediates(outdir)
     outdir = outdir if os.path.isabs(outdir) else os.path.join(os.getcwd(), outdir)
@@ -444,6 +445,8 @@ def omop2owl(
     outpath: str = _get_merged_file_outpath(outdir, ontology_id, vocabs)
     ontology_iri_pattern = 'http://purl.obolibrary.org/obo/{}/ontology'
     ontology_iri = ontology_iri_pattern.format(ontology_id)
+    # todo: clarify/improve this type change. I think this is because indicates it expects they are set to 'All', but i
+    #  should just check against that value explicitly
     if isinstance(vocabs, str):
         vocabs = [vocabs]
     if isinstance(relationships, str):
@@ -459,7 +462,9 @@ def omop2owl(
         concept_csv_path, concept_relationship_csv_path, outpath, vocabs, relationships, exclude_singletons, use_cache)
     if not retain_general_cache:
         os.remove(cache_path)
-    if vocabs or not split_by_vocab:
+    # todo #1: bugfix 2023/10/17: was previously 'if vocabs or not split_by_vocab'. why 'if vocabs' there? am I missing
+    #  something here? Shouldn't this just be where we do combined input only? That's the fix I put in place today.
+    if not split_by_vocab_merge_after:
         _create_outputs(
             concept_df, rel_maps, outpath, ontology_iri, use_cache=use_cache, skip_semsql=skip_semsql, memory=memory,
             retain_robot_templates=retain_robot_templates)

@@ -1,4 +1,4 @@
-.PHONY: test install python-dependencies docker-dependencies help clean build pypi pypi-test
+w.PHONY: test install python-dependencies docker-dependencies help clean build pypi pypi-test
 
 # SETUP / INSTALLATION -------------------------------------------------------------------------------------------------
 python-dependencies:
